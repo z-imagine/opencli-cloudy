@@ -15,13 +15,16 @@ function generateId(): string {
 
 export interface DaemonCommand {
   id: string;
-  action: 'exec' | 'navigate' | 'tabs' | 'cookies';
+  action: 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot';
   tabId?: number;
   code?: string;
   url?: string;
   op?: string;
   index?: number;
   domain?: string;
+  format?: 'png' | 'jpeg';
+  quality?: number;
+  fullPage?: boolean;
 }
 
 export interface DaemonResult {

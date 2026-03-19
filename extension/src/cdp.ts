@@ -15,10 +15,7 @@ async function ensureAttached(tabId: number): Promise<void> {
     await chrome.debugger.attach({ tabId }, '1.3');
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    // "Already attached" from OUR previous session (service worker restart) — OK, track it
     if (msg.includes('Another debugger is already attached')) {
-      // Don't add to attached set — we can't sendCommand on someone else's session
-      // Try to detach and re-attach to claim ownership
       try { await chrome.debugger.detach({ tabId }); } catch { /* ignore */ }
       try {
         await chrome.debugger.attach({ tabId }, '1.3');
@@ -61,6 +58,56 @@ export async function evaluate(tabId: number, expression: string): Promise<unkno
 }
 
 export const evaluateAsync = evaluate;
+
+/**
+ * Capture a screenshot via CDP Page.captureScreenshot.
+ * Returns base64-encoded image data.
+ */
+export async function screenshot(
+  tabId: number,
+  options: { format?: 'png' | 'jpeg'; quality?: number; fullPage?: boolean } = {},
+): Promise<string> {
+  await ensureAttached(tabId);
+
+  const format = options.format ?? 'png';
+
+  // For full-page screenshots, get the full page dimensions first
+  if (options.fullPage) {
+    // Get full page metrics
+    const metrics = await chrome.debugger.sendCommand({ tabId }, 'Page.getLayoutMetrics') as {
+      contentSize?: { width: number; height: number };
+      cssContentSize?: { width: number; height: number };
+    };
+    const size = metrics.cssContentSize || metrics.contentSize;
+    if (size) {
+      // Set device metrics to full page size
+      await chrome.debugger.sendCommand({ tabId }, 'Emulation.setDeviceMetricsOverride', {
+        mobile: false,
+        width: Math.ceil(size.width),
+        height: Math.ceil(size.height),
+        deviceScaleFactor: 1,
+      });
+    }
+  }
+
+  try {
+    const params: Record<string, unknown> = { format };
+    if (format === 'jpeg' && options.quality !== undefined) {
+      params.quality = Math.max(0, Math.min(100, options.quality));
+    }
+
+    const result = await chrome.debugger.sendCommand({ tabId }, 'Page.captureScreenshot', params) as {
+      data: string; // base64-encoded
+    };
+
+    return result.data;
+  } finally {
+    // Reset device metrics if we changed them for full-page
+    if (options.fullPage) {
+      await chrome.debugger.sendCommand({ tabId }, 'Emulation.clearDeviceMetricsOverride').catch(() => {});
+    }
+  }
+}
 
 export function detach(tabId: number): void {
   if (!attached.has(tabId)) return;

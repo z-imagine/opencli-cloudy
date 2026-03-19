@@ -192,6 +192,37 @@ export class Page implements IPage {
     return [];
   }
 
+  /**
+   * Capture a screenshot via CDP Page.captureScreenshot.
+   * @param options.format - 'png' (default) or 'jpeg'
+   * @param options.quality - JPEG quality 0-100
+   * @param options.fullPage - capture full scrollable page
+   * @param options.path - save to file path (returns base64 if omitted)
+   */
+  async screenshot(options: {
+    format?: 'png' | 'jpeg';
+    quality?: number;
+    fullPage?: boolean;
+    path?: string;
+  } = {}): Promise<string> {
+    const base64 = await sendCommand('screenshot', {
+      format: options.format,
+      quality: options.quality,
+      fullPage: options.fullPage,
+      ...this._tabOpt(),
+    }) as string;
+
+    if (options.path) {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const dir = path.dirname(options.path);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(options.path, Buffer.from(base64, 'base64'));
+    }
+
+    return base64;
+  }
+
   async scroll(direction: string = 'down', amount: number = 500): Promise<void> {
     const dx = direction === 'left' ? -amount : direction === 'right' ? amount : 0;
     const dy = direction === 'up' ? -amount : direction === 'down' ? amount : 0;

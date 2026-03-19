@@ -1,10 +1,11 @@
 /**
  * opencli browser protocol — shared types between daemon, extension, and CLI.
  *
- * Only 4 actions. Everything else is just JS code sent via 'exec'.
+ * 5 actions: exec, navigate, tabs, cookies, screenshot.
+ * Everything else is just JS code sent via 'exec'.
  */
 
-export type Action = 'exec' | 'navigate' | 'tabs' | 'cookies';
+export type Action = 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot';
 
 export interface Command {
   /** Unique request ID */
@@ -23,6 +24,12 @@ export interface Command {
   index?: number;
   /** Cookie domain filter */
   domain?: string;
+  /** Screenshot format: png (default) or jpeg */
+  format?: 'png' | 'jpeg';
+  /** JPEG quality (0-100), only for jpeg format */
+  quality?: number;
+  /** Whether to capture full page (not just viewport) */
+  fullPage?: boolean;
 }
 
 export interface Result {
@@ -42,7 +49,9 @@ export const DAEMON_HOST = 'localhost';
 export const DAEMON_WS_URL = `ws://${DAEMON_HOST}:${DAEMON_PORT}/ext`;
 export const DAEMON_HTTP_URL = `http://${DAEMON_HOST}:${DAEMON_PORT}`;
 
-/** Reconnect delay for extension WebSocket (ms) */
-export const WS_RECONNECT_DELAY = 3000;
+/** Base reconnect delay for extension WebSocket (ms) */
+export const WS_RECONNECT_BASE_DELAY = 2000;
+/** Max reconnect delay (ms) */
+export const WS_RECONNECT_MAX_DELAY = 60000;
 /** Idle timeout before daemon auto-exits (ms) */
 export const DAEMON_IDLE_TIMEOUT = 5 * 60 * 1000;

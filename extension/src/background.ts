@@ -6,11 +6,12 @@
  */
 
 import type { Command, Result } from './protocol';
-import { DAEMON_WS_URL, WS_RECONNECT_DELAY } from './protocol';
+import { DAEMON_WS_URL, WS_RECONNECT_BASE_DELAY, WS_RECONNECT_MAX_DELAY } from './protocol';
 import * as cdp from './cdp';
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempts = 0;
 
 // ─── WebSocket connection ────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ function connect(): void {
 
   ws.onopen = () => {
     console.log('[opencli] Connected to daemon');
+    reconnectAttempts = 0; // Reset on successful connection
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
@@ -55,10 +57,13 @@ function connect(): void {
 
 function scheduleReconnect(): void {
   if (reconnectTimer) return;
+  reconnectAttempts++;
+  // Exponential backoff: 2s, 4s, 8s, 16s, ..., capped at 60s
+  const delay = Math.min(WS_RECONNECT_BASE_DELAY * Math.pow(2, reconnectAttempts - 1), WS_RECONNECT_MAX_DELAY);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connect();
-  }, WS_RECONNECT_DELAY);
+  }, delay);
 }
 
 // ─── Lifecycle events ────────────────────────────────────────────────
@@ -95,6 +100,8 @@ async function handleCommand(cmd: Command): Promise<Result> {
         return await handleTabs(cmd);
       case 'cookies':
         return await handleCookies(cmd);
+      case 'screenshot':
+        return await handleScreenshot(cmd);
       default:
         return { id: cmd.id, ok: false, error: `Unknown action: ${cmd.action}` };
     }
@@ -246,4 +253,18 @@ async function handleCookies(cmd: Command): Promise<Result> {
     expirationDate: c.expirationDate,
   }));
   return { id: cmd.id, ok: true, data };
+}
+
+async function handleScreenshot(cmd: Command): Promise<Result> {
+  const tabId = await resolveTabId(cmd.tabId);
+  try {
+    const data = await cdp.screenshot(tabId, {
+      format: cmd.format,
+      quality: cmd.quality,
+      fullPage: cmd.fullPage,
+    });
+    return { id: cmd.id, ok: true, data };
+  } catch (err) {
+    return { id: cmd.id, ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
 }
