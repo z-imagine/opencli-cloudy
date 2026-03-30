@@ -30,6 +30,23 @@
   install:
     default: "npm install -g @larksuite/cli"
 
+- name: dws
+  binary: dws
+  description: "DingTalk Workspace CLI — messages, docs, calendar, contacts and more for humans and AI agents"
+  homepage: "https://github.com/DingTalk-Real-AI/dingtalk-workspace-cli"
+  tags: [dingtalk, collaboration, productivity, ai-agent]
+  install:
+    mac: "curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh"
+    linux: "curl -fsSL https://raw.githubusercontent.com/DingTalk-Real-AI/dingtalk-workspace-cli/main/scripts/install.sh | sh"
+
+- name: wecom-cli
+  binary: wecom-cli
+  description: "WeCom/企业微信 CLI — contacts, todos, meetings, messages, calendar, docs and smart sheets for AI agents"
+  homepage: "https://github.com/WecomTeam/wecom-cli"
+  tags: [wecom, wechat-work, collaboration, productivity, ai-agent]
+  install:
+    default: "npm install -g @wecom/cli"
+
 - name: vercel
   binary: vercel
   description: "Vercel CLI — deploy projects, manage domains, env vars, logs and serverless functions"
