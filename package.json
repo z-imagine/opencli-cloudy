@@ -19,6 +19,7 @@
   },
   "scripts": {
     "dev": "tsx src/main.ts",
+    "remote-bridge:dev": "tsx src/remote-bridge/main.ts",
     "dev:bun": "bun src/main.ts",
     "build": "npm run clean-dist && tsc && npm run clean-yaml && npm run copy-yaml && npm run build-manifest",
     "build-manifest": "node dist/build-manifest.js",
@@ -26,6 +27,7 @@
     "clean-yaml": "node scripts/clean-yaml.cjs",
     "copy-yaml": "node scripts/copy-yaml.cjs",
     "start": "node dist/main.js",
+    "remote-bridge:start": "node dist/remote-bridge/main.js",
     "start:bun": "bun dist/main.js",
     "postinstall": "node scripts/postinstall.js || true",
     "typecheck": "tsc --noEmit",
