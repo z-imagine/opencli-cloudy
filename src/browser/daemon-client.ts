@@ -6,44 +6,12 @@
 
 import { DEFAULT_DAEMON_PORT } from '../constants.js';
 import type { BrowserSessionInfo } from '../types.js';
-import { sleep } from '../utils.js';
+import { LocalDaemonTransport } from './transport.js';
 
 const DAEMON_PORT = parseInt(process.env.OPENCLI_DAEMON_PORT ?? String(DEFAULT_DAEMON_PORT), 10);
 const DAEMON_URL = `http://127.0.0.1:${DAEMON_PORT}`;
 
-let _idCounter = 0;
-
-function generateId(): string {
-  return `cmd_${Date.now()}_${++_idCounter}`;
-}
-
-export interface DaemonCommand {
-  id: string;
-  action: 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot' | 'close-window' | 'sessions' | 'set-file-input' | 'bind-current';
-  tabId?: number;
-  code?: string;
-  workspace?: string;
-  url?: string;
-  op?: string;
-  index?: number;
-  domain?: string;
-  matchDomain?: string;
-  matchPathPrefix?: string;
-  format?: 'png' | 'jpeg';
-  quality?: number;
-  fullPage?: boolean;
-  /** Local file paths for set-file-input action */
-  files?: string[];
-  /** CSS selector for file input element (set-file-input action) */
-  selector?: string;
-}
-
-export interface DaemonResult {
-  id: string;
-  ok: boolean;
-  data?: unknown;
-  error?: string;
-}
+const localTransport = new LocalDaemonTransport();
 
 /**
  * Check if daemon is running.
@@ -89,57 +57,10 @@ export async function isExtensionConnected(): Promise<boolean> {
  * transient extension errors retry at 1500ms.
  */
 export async function sendCommand(
-  action: DaemonCommand['action'],
-  params: Omit<DaemonCommand, 'id' | 'action'> = {},
+  action: 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot' | 'close-window' | 'sessions' | 'set-file-input' | 'bind-current',
+  params: Record<string, unknown> = {},
 ): Promise<unknown> {
-  const maxRetries = 4;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    // Generate a fresh ID per attempt to avoid daemon-side duplicate detection
-    const id = generateId();
-    const command: DaemonCommand = { id, action, ...params };
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 30000);
-
-      const res = await fetch(`${DAEMON_URL}/command`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-OpenCLI': '1' },
-        body: JSON.stringify(command),
-        signal: controller.signal,
-      });
-      clearTimeout(timer);
-
-      const result = (await res.json()) as DaemonResult;
-
-      if (!result.ok) {
-        // Check if error is a transient extension issue worth retrying
-        const errMsg = result.error ?? '';
-        const isTransient = errMsg.includes('Extension disconnected')
-          || errMsg.includes('Extension not connected')
-          || errMsg.includes('attach failed')
-          || errMsg.includes('no longer exists');
-        if (isTransient && attempt < maxRetries) {
-          // Longer delay for extension recovery (service worker restart)
-          await sleep(1500);
-          continue;
-        }
-        throw new Error(result.error ?? 'Daemon command failed');
-      }
-
-      return result.data;
-    } catch (err) {
-      const isRetryable = err instanceof TypeError  // fetch network error
-        || (err instanceof Error && err.name === 'AbortError');
-      if (isRetryable && attempt < maxRetries) {
-        await sleep(500);
-        continue;
-      }
-      throw err;
-    }
-  }
-  // Unreachable — the loop always returns or throws
-  throw new Error('sendCommand: max retries exhausted');
+  return localTransport.send(action, params);
 }
 
 export async function listSessions(): Promise<BrowserSessionInfo[]> {
@@ -150,4 +71,3 @@ export async function listSessions(): Promise<BrowserSessionInfo[]> {
 export async function bindCurrentTab(workspace: string, opts: { matchDomain?: string; matchPathPrefix?: string } = {}): Promise<unknown> {
   return sendCommand('bind-current', { workspace, ...opts });
 }
-

@@ -11,6 +11,7 @@ import type { IBrowserFactory } from '../runtime.js';
 import { Page } from './page.js';
 import { isDaemonRunning, isExtensionConnected } from './daemon-client.js';
 import { DEFAULT_DAEMON_PORT } from '../constants.js';
+import { LocalDaemonTransport } from './transport.js';
 
 const DAEMON_SPAWN_TIMEOUT = 10000; // 10s to wait for daemon + extension
 
@@ -38,7 +39,7 @@ export class BrowserBridge implements IBrowserFactory {
 
     try {
       await this._ensureDaemon(opts.timeout);
-      this._page = new Page(opts.workspace);
+      this._page = new Page(opts.workspace, new LocalDaemonTransport());
       this._state = 'connected';
       return this._page;
     } catch (err) {

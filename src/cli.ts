@@ -16,6 +16,7 @@ import { printCompletionScript } from './completion.js';
 import { loadExternalClis, executeExternalCli, installExternalCli, registerExternalCli, isBinaryInstalled } from './external.js';
 import { registerAllCommands } from './commanderAdapter.js';
 import { EXIT_CODES, getErrorMessage } from './errors.js';
+import { listRemoteClients } from './browser/transport.js';
 
 export function runCli(BUILTIN_CLIS: string, USER_CLIS: string): void {
   const program = new Command();
@@ -25,7 +26,19 @@ export function runCli(BUILTIN_CLIS: string, USER_CLIS: string): void {
     .name('opencli')
     .description('Make any website your CLI. Zero setup. AI-powered.')
     .version(PKG_VERSION)
+    .option('--remote-url <url>', 'Remote bridge base URL')
+    .option('--token <token>', 'Remote bridge token')
+    .option('--client <id>', 'Remote bridge client ID')
     .enablePositionalOptions();
+
+  program.hook('preAction', (_thisCommand, actionCommand) => {
+    const opts = typeof actionCommand.optsWithGlobals === 'function'
+      ? actionCommand.optsWithGlobals()
+      : program.opts();
+    if (typeof opts.remoteUrl === 'string' && opts.remoteUrl) process.env.OPENCLI_REMOTE_URL = opts.remoteUrl;
+    if (typeof opts.token === 'string' && opts.token) process.env.OPENCLI_REMOTE_TOKEN = opts.token;
+    if (typeof opts.client === 'string' && opts.client) process.env.OPENCLI_REMOTE_CLIENT = opts.client;
+  });
 
   // ── Built-in: list ────────────────────────────────────────────────────────
 
@@ -100,6 +113,20 @@ export function runCli(BUILTIN_CLIS: string, USER_CLIS: string): void {
 
       console.log(chalk.dim(`  ${commands.length} built-in commands across ${sites.size} sites, ${externalClis.length} external CLIs`));
       console.log();
+    });
+
+  program
+    .command('clients')
+    .description('List online remote browser clients')
+    .option('-f, --format <fmt>', 'Output format: table, json, yaml, md, csv', 'table')
+    .action(async (opts) => {
+      const clients = await listRemoteClients();
+      renderOutput(clients, {
+        fmt: opts.format,
+        columns: ['clientId', 'connectedAt', 'lastSeenAt', 'extensionVersion', 'browserInfo', 'capabilities'],
+        title: 'opencli/clients',
+        source: 'opencli clients',
+      });
     });
 
   // ── Built-in: validate / verify ───────────────────────────────────────────

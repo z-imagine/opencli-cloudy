@@ -30,7 +30,7 @@
 | --- | --- | --- | --- |
 | 0 | 方案冻结与任务准备 | 已完成 | 已冻结 bridge 目录、CLI 配置入口、扩展存储、协议字段、阈值与试点 adapter |
 | 1 | Bridge MVP | 已完成 | 已完成 bridge 服务骨架、注册表、鉴权、客户端列表、命令路由、pending 回收与基础单测 |
-| 2 | CLI Transport 重构 | 未开始 | |
+| 2 | CLI Transport 重构 | 已完成 | 已抽象 transport、支持远程模式、补 `opencli clients`、并通过定向单测 |
 | 3 | 扩展远程接入 | 未开始 | |
 | 4 | 远程文件注入 MVP | 未开始 | |
 | 5 | Adapter 试点接入 | 未开始 | |
@@ -153,16 +153,16 @@
 
 | 编号 | 子任务 | 说明 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
-| 2.1 | 抽象 `BrowserTransport` 接口 | 从现有本地 transport 中抽出统一接口 | 未开始 | |
-| 2.2 | 实现 `LocalDaemonTransport` | 保持现有本地行为不变 | 未开始 | |
-| 2.3 | 实现 `RemoteBridgeTransport` | 对接远程 bridge HTTP API | 未开始 | |
-| 2.4 | 改造 `Page` 构造方式 | `Page` 不再直接依赖本地 `sendCommand` | 未开始 | |
-| 2.5 | 改造 `runtime` 选择逻辑 | 支持本地与远程模式切换 | 未开始 | |
-| 2.6 | 新增 CLI 全局参数 | 增加 `--remote-url`、`--token`、`--client` | 未开始 | |
-| 2.7 | 支持 env 配置读取 | 增加 `OPENCLI_REMOTE_URL` 等变量 | 未开始 | |
-| 2.8 | 新增 `opencli clients` 命令 | 调远程 bridge 查看在线客户端 | 未开始 | |
-| 2.9 | 更新错误处理 | 区分本地 bridge 与远程 bridge 错误文案 | 未开始 | |
-| 2.10 | 补 transport 相关测试 | 覆盖本地模式兼容与远程模式调用 | 未开始 | |
+| 2.1 | 抽象 `BrowserTransport` 接口 | 从现有本地 transport 中抽出统一接口 | 已完成 | 新增 `src/browser/transport.ts` |
+| 2.2 | 实现 `LocalDaemonTransport` | 保持现有本地行为不变 | 已完成 | 已复用原 daemon HTTP 行为 |
+| 2.3 | 实现 `RemoteBridgeTransport` | 对接远程 bridge HTTP API | 已完成 | 已支持 `POST /api/command` |
+| 2.4 | 改造 `Page` 构造方式 | `Page` 不再直接依赖本地 `sendCommand` | 已完成 | `Page` 已改为依赖 transport |
+| 2.5 | 改造 `runtime` 选择逻辑 | 支持本地与远程模式切换 | 已完成 | 新增远程模式判断与 `RemoteBrowserBridge` |
+| 2.6 | 新增 CLI 全局参数 | 增加 `--remote-url`、`--token`、`--client` | 已完成 | 已写入 `src/cli.ts` |
+| 2.7 | 支持 env 配置读取 | 增加 `OPENCLI_REMOTE_URL` 等变量 | 已完成 | 已支持 env 与参数注入 |
+| 2.8 | 新增 `opencli clients` 命令 | 调远程 bridge 查看在线客户端 | 已完成 | 已实现 |
+| 2.9 | 更新错误处理 | 区分本地 bridge 与远程 bridge 错误文案 | 已完成 | 已补远程 transport 错误文案与缺参校验 |
+| 2.10 | 补 transport 相关测试 | 覆盖本地模式兼容与远程模式调用 | 已完成 | 已补 `src/browser/transport.test.ts` |
 
 ### 5.2 阶段自检
 
@@ -176,6 +176,24 @@
 - 本地模式测试通过
 - 远程模式能成功下发基础命令
 - CLI 可指定 `clientId`
+
+### 5.4 阶段完成记录
+
+```text
+阶段 2：CLI Transport 重构
+状态：已完成
+完成时间：2026-03-31
+备注：已完成 transport 抽象、本地与远程 transport、远程运行时选择、CLI 全局参数和 clients 命令
+```
+
+```text
+自检结论：通过
+问题记录：
+- 当前远程模式已可通过 env 或全局参数指定 clientId，但扩展端仍未接入远程注册流程
+- 本轮做了定向编译与单测，未做全仓 typecheck 收口
+后续动作：
+- 进入阶段 3：扩展远程接入
+```
 
 ## 6. 阶段 3：扩展远程接入
 

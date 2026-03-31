@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      width: 280px;
+      width: 320px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 13px;
       color: #333;
@@ -22,7 +22,7 @@
     .header h1 { font-size: 15px; font-weight: 600; }
     .status-row {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 8px;
       padding: 10px 12px;
       border-radius: 8px;
@@ -38,6 +38,63 @@
     .dot.connecting { background: #ff9500; }
     .status-text { font-size: 13px; color: #555; }
     .status-text strong { color: #333; }
+    .status-meta {
+      margin-top: 4px;
+      font-size: 11px;
+      color: #777;
+      word-break: break-all;
+      white-space: pre-line;
+      line-height: 1.5;
+    }
+    .form {
+      margin-top: 14px;
+      display: grid;
+      gap: 10px;
+    }
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+    .field label {
+      font-size: 12px;
+      color: #555;
+    }
+    .field input {
+      width: 100%;
+      border: 1px solid #d9d9d9;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: #222;
+    }
+    .field input:focus {
+      outline: none;
+      border-color: #007aff;
+      box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.12);
+    }
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    button {
+      border: none;
+      border-radius: 6px;
+      background: #007aff;
+      color: #fff;
+      font-size: 12px;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .save-status {
+      font-size: 11px;
+      color: #666;
+      min-height: 16px;
+    }
     .hint {
       margin-top: 10px;
       padding: 8px 10px;
@@ -71,13 +128,30 @@
   </div>
   <div class="status-row">
     <span class="dot disconnected" id="dot"></span>
-    <span class="status-text" id="status">Checking...</span>
+    <div class="status-text">
+      <div id="status"><strong>正在检查连接状态...</strong></div>
+      <div class="status-meta" id="meta"></div>
+    </div>
   </div>
+  <form class="form" id="config-form">
+    <div class="field">
+      <label for="backend-url">后端地址</label>
+      <input id="backend-url" name="backend-url" type="url" placeholder="https://bridge.example.com">
+    </div>
+    <div class="field">
+      <label for="token">固定 Token</label>
+      <input id="token" name="token" type="password" placeholder="输入 bridge token">
+    </div>
+    <div class="actions">
+      <button id="save" type="submit">保存并连接</button>
+      <span class="save-status" id="save-status"></span>
+    </div>
+  </form>
   <div class="hint" id="hint">
-    This is normal. The extension connects automatically when you run any <code>opencli</code> command.
+    保存后扩展会自动连接远程 bridge，并在这里显示分配到的 <code>clientId</code>。
   </div>
   <div class="footer">
-    <a href="https://github.com/jackwener/opencli" target="_blank">Documentation</a>
+    <a href="https://github.com/jackwener/opencli" target="_blank">项目文档</a>
   </div>
   <script src="popup.js"></script>
 </body>

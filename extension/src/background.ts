@@ -1,31 +1,143 @@
 /**
  * OpenCLI — Service Worker (background script).
  *
- * Connects to the opencli daemon via WebSocket, receives commands,
+ * Connects to the remote bridge via WebSocket, receives commands,
  * dispatches them to Chrome APIs (debugger/tabs/cookies), returns results.
  */
 
-import type { Command, Result } from './protocol';
-import { DAEMON_WS_URL, DAEMON_PING_URL, WS_RECONNECT_BASE_DELAY, WS_RECONNECT_MAX_DELAY } from './protocol';
+import type {
+  Command,
+  ConnectionState,
+  ExtensionConfig,
+  RegisterMessage,
+  RemoteCommandEnvelope,
+  Result,
+  StatusResponse,
+} from './protocol';
+import {
+  DEFAULT_HARD_MEMORY_BYTES,
+  DEFAULT_WARN_MEMORY_BYTES,
+  WS_RECONNECT_BASE_DELAY,
+  WS_RECONNECT_MAX_DELAY,
+  commandFromEnvelope,
+  isRegisteredMessage,
+  isRemoteCommandEnvelope,
+  normalizeBackendUrl,
+  toBridgeHealthUrl,
+  toBridgeWebSocketUrl,
+} from './protocol';
 import * as executor from './cdp';
 
 let ws: WebSocket | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempts = 0;
+let connectionState: ConnectionState = 'disconnected';
+let lastError = '';
+
+const STORAGE_KEY_BACKEND_URL = 'backendUrl';
+const STORAGE_KEY_TOKEN = 'token';
+const STORAGE_KEY_CLIENT_ID = 'clientId';
+const CONFIG_STORAGE_KEYS = [STORAGE_KEY_BACKEND_URL, STORAGE_KEY_TOKEN, STORAGE_KEY_CLIENT_ID] as const;
+const HEARTBEAT_ALARM = 'keepalive';
+const configCache: ExtensionConfig = {
+  backendUrl: '',
+  token: '',
+  clientId: '',
+};
+
+async function hydrateConfig(): Promise<ExtensionConfig> {
+  const stored = await chrome.storage.local.get(CONFIG_STORAGE_KEYS);
+  configCache.backendUrl = typeof stored.backendUrl === 'string' ? normalizeBackendUrl(stored.backendUrl) : '';
+  configCache.token = typeof stored.token === 'string' ? stored.token.trim() : '';
+  configCache.clientId = typeof stored.clientId === 'string' ? stored.clientId : '';
+  return { ...configCache };
+}
+
+async function persistConfig(patch: Partial<ExtensionConfig>): Promise<ExtensionConfig> {
+  const next: ExtensionConfig = {
+    backendUrl: patch.backendUrl !== undefined ? normalizeBackendUrl(patch.backendUrl) : configCache.backendUrl,
+    token: patch.token !== undefined ? patch.token.trim() : configCache.token,
+    clientId: patch.clientId !== undefined ? patch.clientId : configCache.clientId,
+  };
+  await chrome.storage.local.set(next);
+  configCache.backendUrl = next.backendUrl;
+  configCache.token = next.token;
+  configCache.clientId = next.clientId;
+  return { ...next };
+}
+
+function hasRemoteBridgeConfig(): boolean {
+  return configCache.backendUrl.length > 0 && configCache.token.length > 0;
+}
+
+function setConnectionState(state: ConnectionState, error = ''): void {
+  connectionState = state;
+  lastError = error;
+}
+
+async function getStatusPayload(): Promise<StatusResponse> {
+  await hydrateConfig();
+  return {
+    ...configCache,
+    connected: ws?.readyState === WebSocket.OPEN,
+    reconnecting: reconnectTimer !== null,
+    state: connectionState,
+    lastError: lastError || undefined,
+  };
+}
+
+function clearReconnectTimer(): void {
+  if (!reconnectTimer) return;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+}
+
+function disconnectSocket(): void {
+  clearReconnectTimer();
+  if (!ws) {
+    setConnectionState('disconnected');
+    return;
+  }
+  const current = ws;
+  ws = null;
+  current.onopen = null;
+  current.onmessage = null;
+  current.onclose = null;
+  current.onerror = null;
+  try {
+    current.close();
+  } catch {
+    // ignore close failures during reconfigure
+  }
+  setConnectionState('disconnected');
+}
+
+function buildRegisterMessage(): RegisterMessage {
+  return {
+    type: 'register',
+    token: configCache.token,
+    extensionVersion: chrome.runtime.getManifest().version,
+    browserInfo: typeof navigator?.userAgent === 'string' ? navigator.userAgent : 'unknown',
+    capabilities: {
+      fileInputMemory: true,
+      fileInputDisk: false,
+      warnMemoryBytes: DEFAULT_WARN_MEMORY_BYTES,
+      hardMemoryBytes: DEFAULT_HARD_MEMORY_BYTES,
+    },
+  };
+}
 
 // ─── Console log forwarding ──────────────────────────────────────────
-// Hook console.log/warn/error to forward logs to daemon via WebSocket.
+// Keep console overrides local. Remote bridge protocol currently does not
+// accept log frames, so this is intentionally a no-op for network traffic.
 
 const _origLog = console.log.bind(console);
 const _origWarn = console.warn.bind(console);
 const _origError = console.error.bind(console);
 
 function forwardLog(level: 'info' | 'warn' | 'error', args: unknown[]): void {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  try {
-    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-    ws.send(JSON.stringify({ type: 'log', level, msg, ts: Date.now() }));
-  } catch { /* don't recurse */ }
+  void level;
+  void args;
 }
 
 console.log = (...args: unknown[]) => { _origLog(...args); forwardLog('info', args); };
@@ -34,66 +146,101 @@ console.error = (...args: unknown[]) => { _origError(...args); forwardLog('error
 
 // ─── WebSocket connection ────────────────────────────────────────────
 
-/**
- * Probe the daemon via its /ping HTTP endpoint before attempting a WebSocket
- * connection.  fetch() failures are silently catchable; new WebSocket() is not
- * — Chrome logs ERR_CONNECTION_REFUSED to the extension error page before any
- * JS handler can intercept it.  By keeping the probe inside connect() every
- * call site remains unchanged and the guard can never be accidentally skipped.
- */
 async function connect(): Promise<void> {
   if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
+  await hydrateConfig();
+  if (!hasRemoteBridgeConfig()) {
+    setConnectionState('disconnected');
+    return;
+  }
+
+  setConnectionState('connecting');
+
+  const healthUrl = toBridgeHealthUrl(configCache.backendUrl);
+  const wsUrl = toBridgeWebSocketUrl(configCache.backendUrl);
 
   try {
-    const res = await fetch(DAEMON_PING_URL, { signal: AbortSignal.timeout(1000) });
-    if (!res.ok) return; // unexpected response — not our daemon
+    const res = await fetch(healthUrl, { signal: AbortSignal.timeout(1000) });
+    if (!res.ok) {
+      setConnectionState('disconnected', `Bridge health check failed: ${res.status}`);
+      scheduleReconnect();
+      return;
+    }
   } catch {
-    return; // daemon not running — skip WebSocket to avoid console noise
+    setConnectionState('disconnected', 'Bridge is unreachable');
+    scheduleReconnect();
+    return;
   }
 
   try {
-    ws = new WebSocket(DAEMON_WS_URL);
+    ws = new WebSocket(wsUrl);
   } catch {
+    setConnectionState('disconnected', 'Failed to create bridge WebSocket');
     scheduleReconnect();
     return;
   }
 
   ws.onopen = () => {
-    console.log('[opencli] Connected to daemon');
-    reconnectAttempts = 0; // Reset on successful connection
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-    // Send version so the daemon can report mismatches to the CLI
-    ws?.send(JSON.stringify({ type: 'hello', version: chrome.runtime.getManifest().version }));
+    console.log('[opencli] Connected to remote bridge');
+    clearReconnectTimer();
+    ws?.send(JSON.stringify(buildRegisterMessage()));
   };
 
   ws.onmessage = async (event) => {
     try {
-      const command = JSON.parse(event.data as string) as Command;
-      const result = await handleCommand(command);
-      ws?.send(JSON.stringify(result));
+      await handleBridgeMessage(event.data as string);
     } catch (err) {
       console.error('[opencli] Message handling error:', err);
     }
   };
 
   ws.onclose = () => {
-    console.log('[opencli] Disconnected from daemon');
+    console.log('[opencli] Disconnected from remote bridge');
     ws = null;
+    reconnectAttempts = 0;
+    void persistConfig({ clientId: '' });
+    setConnectionState('disconnected', 'Bridge connection closed');
     scheduleReconnect();
   };
 
   ws.onerror = () => {
+    setConnectionState('disconnected', 'Bridge WebSocket error');
     ws?.close();
   };
 }
 
+async function handleBridgeMessage(raw: string): Promise<void> {
+  const parsed = JSON.parse(raw) as unknown;
+  if (isRegisteredMessage(parsed)) {
+    reconnectAttempts = 0;
+    await persistConfig({ clientId: parsed.clientId });
+    setConnectionState('connected');
+    console.log(`[opencli] Registered with remote bridge as ${parsed.clientId}`);
+    return;
+  }
+  if (isRemoteCommandEnvelope(parsed)) {
+    const envelope = parsed as RemoteCommandEnvelope;
+    if (configCache.clientId && envelope.clientId !== configCache.clientId) {
+      throw new Error(`Client mismatch: expected ${configCache.clientId}, got ${envelope.clientId}`);
+    }
+    const command = commandFromEnvelope(envelope);
+    const result = await handleCommand(command);
+    ws?.send(JSON.stringify({
+      type: 'result',
+      clientId: envelope.clientId,
+      commandId: envelope.commandId,
+      ok: result.ok,
+      data: result.data,
+      error: result.error,
+    }));
+    return;
+  }
+  throw new Error('Unsupported bridge message');
+}
+
 /**
  * After MAX_EAGER_ATTEMPTS (reaching 60s backoff), stop scheduling reconnects.
- * The keepalive alarm (~24s) will still call connect() periodically, but at a
- * much lower frequency — reducing console noise when the daemon is not running.
+ * The keepalive alarm (~24s) will still call connect() periodically.
  */
 const MAX_EAGER_ATTEMPTS = 6; // 2s, 4s, 8s, 16s, 32s, 60s — then stop
 
@@ -106,6 +253,15 @@ function scheduleReconnect(): void {
     reconnectTimer = null;
     void connect();
   }, delay);
+}
+
+function sendHeartbeat(): void {
+  if (!ws || ws.readyState !== WebSocket.OPEN || !configCache.clientId) return;
+  ws.send(JSON.stringify({
+    type: 'heartbeat',
+    clientId: configCache.clientId,
+    ts: Date.now(),
+  }));
 }
 
 // ─── Automation window isolation ─────────────────────────────────────
@@ -209,11 +365,53 @@ let initialized = false;
 function initialize(): void {
   if (initialized) return;
   initialized = true;
-  chrome.alarms.create('keepalive', { periodInMinutes: 0.4 }); // ~24 seconds
+  chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: 0.4 }); // ~24 seconds
   executor.registerListeners();
-  void connect();
+  void hydrateConfig().then(() => connect());
   console.log('[opencli] OpenCLI extension initialized');
 }
+
+void hydrateConfig();
+
+async function saveRemoteBridgeConfig(backendUrl: string, token: string): Promise<StatusResponse> {
+  disconnectSocket();
+  reconnectAttempts = 0;
+  await persistConfig({
+    backendUrl,
+    token,
+    clientId: '',
+  });
+  if (hasRemoteBridgeConfig()) {
+    await connect();
+  } else {
+    setConnectionState('disconnected');
+  }
+  return getStatusPayload();
+}
+
+function isRuntimeMessage(value: unknown): value is { type: string; backendUrl?: string; token?: string } {
+  return typeof value === 'object' && value !== null && typeof (value as { type?: unknown }).type === 'string';
+}
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (!isRuntimeMessage(msg)) return false;
+  if (msg.type === 'getStatus') {
+    void getStatusPayload().then(sendResponse);
+    return true;
+  }
+  if (msg.type === 'saveConfig') {
+    void saveRemoteBridgeConfig(typeof msg.backendUrl === 'string' ? msg.backendUrl : '', typeof msg.token === 'string' ? msg.token : '')
+      .then(sendResponse)
+      .catch((error) => {
+        sendResponse({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    return true;
+  }
+  return false;
+});
 
 chrome.runtime.onInstalled.addListener(() => {
   initialize();
@@ -224,19 +422,12 @@ chrome.runtime.onStartup.addListener(() => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'keepalive') void connect();
-});
-
-// ─── Popup status API ───────────────────────────────────────────────
-
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg?.type === 'getStatus') {
-    sendResponse({
-      connected: ws?.readyState === WebSocket.OPEN,
-      reconnecting: reconnectTimer !== null,
-    });
+  if (alarm.name !== HEARTBEAT_ALARM) return;
+  if (ws?.readyState === WebSocket.OPEN) {
+    sendHeartbeat();
+    return;
   }
-  return false;
+  void connect();
 });
 
 // ─── Command dispatcher ─────────────────────────────────────────────
@@ -763,6 +954,9 @@ async function handleBindCurrent(cmd: Command, workspace: string): Promise<Resul
 }
 
 export const __test__ = {
+  getStatusPayload,
+  handleBridgeMessage,
+  saveRemoteBridgeConfig,
   handleNavigate,
   isTargetUrl,
   handleTabs,
@@ -788,4 +982,6 @@ export const __test__ = {
   setSession: (workspace: string, session: { windowId: number; owned: boolean; preferredTabId: number | null }) => {
     setWorkspaceSession(workspace, session);
   },
+  setConnectionState,
+  setClientId: async (clientId: string) => persistConfig({ clientId }),
 };

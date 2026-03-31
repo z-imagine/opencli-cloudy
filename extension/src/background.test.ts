@@ -14,14 +14,22 @@ type MockTab = {
 class MockWebSocket {
   static OPEN = 1;
   static CONNECTING = 0;
+  static instances: MockWebSocket[] = [];
+  url: string;
   readyState = MockWebSocket.CONNECTING;
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  sent: string[] = [];
 
-  constructor(_url: string) {}
-  send(_data: string): void {}
+  constructor(url: string) {
+    this.url = url;
+    MockWebSocket.instances.push(this);
+  }
+  send(data: string): void {
+    this.sent.push(data);
+  }
   close(): void {
     this.onclose?.();
   }
@@ -91,6 +99,19 @@ function createChromeMock() {
       onMessage: { addListener: vi.fn() } as Listener<(msg: unknown, sender: unknown, sendResponse: (value: unknown) => void) => void>,
       getManifest: vi.fn(() => ({ version: 'test-version' })),
     },
+    storage: {
+      local: {
+        _store: {} as Record<string, string>,
+        get: vi.fn(async (keys?: string[] | string) => {
+          if (!keys) return { ...chrome.storage.local._store };
+          const list = Array.isArray(keys) ? keys : [keys];
+          return Object.fromEntries(list.map((key) => [key, chrome.storage.local._store[key]]));
+        }),
+        set: vi.fn(async (value: Record<string, string>) => {
+          Object.assign(chrome.storage.local._store, value);
+        }),
+      },
+    },
     cookies: {
       getAll: vi.fn(async () => []),
     },
@@ -103,7 +124,9 @@ describe('background tab isolation', () => {
   beforeEach(() => {
     vi.resetModules();
     vi.useRealTimers();
+    MockWebSocket.instances = [];
     vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200 })));
   });
 
   afterEach(() => {
@@ -392,5 +415,62 @@ describe('background tab isolation', () => {
       ok: false,
       error: 'No visible tab matching notebooklm.google.com /notebook/',
     });
+  });
+
+  it('stores remote bridge config and reports status', async () => {
+    const { chrome } = createChromeMock();
+    vi.stubGlobal('chrome', chrome);
+
+    const mod = await import('./background');
+    const status = await mod.__test__.saveRemoteBridgeConfig('https://bridge.example.com/', 'secret-token');
+
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({
+      backendUrl: 'https://bridge.example.com',
+      token: 'secret-token',
+      clientId: '',
+    });
+    expect(status.backendUrl).toBe('https://bridge.example.com');
+    expect(status.token).toBe('secret-token');
+    expect(status.clientId).toBe('');
+  });
+
+  it('records clientId after registered message', async () => {
+    const { chrome } = createChromeMock();
+    vi.stubGlobal('chrome', chrome);
+
+    const mod = await import('./background');
+    await mod.__test__.handleBridgeMessage(JSON.stringify({
+      type: 'registered',
+      clientId: 'cli_test123',
+      serverTime: Date.now(),
+    }));
+
+    const status = await mod.__test__.getStatusPayload();
+    expect(status.connected).toBe(false);
+    expect(status.clientId).toBe('cli_test123');
+    expect(status.state).toBe('connected');
+  });
+
+  it('sends register payload to remote bridge on connect', async () => {
+    const { chrome } = createChromeMock();
+    vi.stubGlobal('chrome', chrome);
+
+    const mod = await import('./background');
+    await mod.__test__.saveRemoteBridgeConfig('https://bridge.example.com', 'secret-token');
+    const socket = MockWebSocket.instances.at(-1);
+    expect(socket?.url).toBe('wss://bridge.example.com/agent');
+
+    socket!.readyState = MockWebSocket.OPEN;
+    socket!.onopen?.();
+
+    expect(socket!.sent).toHaveLength(1);
+    expect(JSON.parse(socket!.sent[0])).toEqual(expect.objectContaining({
+      type: 'register',
+      token: 'secret-token',
+      capabilities: expect.objectContaining({
+        fileInputMemory: true,
+        fileInputDisk: false,
+      }),
+    }));
   });
 });

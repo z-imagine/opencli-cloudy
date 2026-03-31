@@ -16,7 +16,7 @@ import { pathToFileURL } from 'node:url';
 import { executePipeline } from './pipeline/index.js';
 import { AdapterLoadError, ArgumentError, BrowserConnectError, CommandExecutionError, getErrorMessage } from './errors.js';
 import { shouldUseBrowserSession } from './capabilityRouting.js';
-import { getBrowserFactory, browserSession, runWithTimeout, DEFAULT_BROWSER_COMMAND_TIMEOUT } from './runtime.js';
+import { getBrowserFactory, browserSession, runWithTimeout, DEFAULT_BROWSER_COMMAND_TIMEOUT, isRemoteBrowserMode } from './runtime.js';
 import { emitHook, type HookContext } from './hooks.js';
 import { checkDaemonStatus } from './browser/discover.js';
 import { log } from './logger.js';
@@ -169,21 +169,23 @@ export async function executeCommand(
   let result: unknown;
   try {
     if (shouldUseBrowserSession(cmd)) {
-      // ── Fail-fast: only when daemon is UP but extension is not connected ──
-      // If daemon is not running, let browserSession() handle auto-start as usual.
-      // We only short-circuit when the daemon confirms the extension is missing —
-      // that's a clear setup gap, not a transient startup state.
-      // Use a short timeout: localhost responds in <50ms when running.
-      // 300ms avoids a full 2s wait on cold-start (daemon not yet running).
-      const status = await checkDaemonStatus({ timeout: 300 });
-      if (status.running && !status.extensionConnected) {
-        throw new BrowserConnectError(
-          'Browser Bridge extension not connected',
-          'Install the Browser Bridge:\n' +
-          '  1. Download: https://github.com/jackwener/opencli/releases\n' +
-          '  2. chrome://extensions → Developer Mode → Load unpacked\n' +
-          '  Then run: opencli doctor',
-        );
+      if (!isRemoteBrowserMode()) {
+        // ── Fail-fast: only when daemon is UP but extension is not connected ──
+        // If daemon is not running, let browserSession() handle auto-start as usual.
+        // We only short-circuit when the daemon confirms the extension is missing —
+        // that's a clear setup gap, not a transient startup state.
+        // Use a short timeout: localhost responds in <50ms when running.
+        // 300ms avoids a full 2s wait on cold-start (daemon not yet running).
+        const status = await checkDaemonStatus({ timeout: 300 });
+        if (status.running && !status.extensionConnected) {
+          throw new BrowserConnectError(
+            'Browser Bridge extension not connected',
+            'Install the Browser Bridge:\n' +
+            '  1. Download: https://github.com/jackwener/opencli/releases\n' +
+            '  2. chrome://extensions → Developer Mode → Load unpacked\n' +
+            '  Then run: opencli doctor',
+          );
+        }
       }
       ensureRequiredEnv(cmd);
       const BrowserFactory = getBrowserFactory();

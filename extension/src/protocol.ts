@@ -1,8 +1,5 @@
 /**
- * opencli browser protocol — shared types between daemon, extension, and CLI.
- *
- * 5 actions: exec, navigate, tabs, cookies, screenshot.
- * Everything else is just JS code sent via 'exec'.
+ * opencli browser protocol — shared types between extension and remote bridge.
  */
 
 export type Action = 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot' | 'close-window' | 'sessions' | 'set-file-input' | 'bind-current';
@@ -53,16 +50,107 @@ export interface Result {
   error?: string;
 }
 
-/** Default daemon port */
-export const DAEMON_PORT = 19825;
-export const DAEMON_HOST = 'localhost';
-export const DAEMON_WS_URL = `ws://${DAEMON_HOST}:${DAEMON_PORT}/ext`;
-/** Lightweight health-check endpoint — probed before each WebSocket attempt. */
-export const DAEMON_PING_URL = `http://${DAEMON_HOST}:${DAEMON_PORT}/ping`;
+export interface ExtensionConfig {
+  backendUrl: string;
+  token: string;
+  clientId: string;
+}
+
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
+
+export interface StatusResponse extends ExtensionConfig {
+  connected: boolean;
+  reconnecting: boolean;
+  state: ConnectionState;
+  lastError?: string;
+}
+
+export interface RegisterMessage {
+  type: 'register';
+  token: string;
+  extensionVersion?: string;
+  browserInfo?: string;
+  capabilities: {
+    fileInputMemory: boolean;
+    fileInputDisk: boolean;
+    warnMemoryBytes: number;
+    hardMemoryBytes: number;
+  };
+}
+
+export interface RegisteredMessage {
+  type: 'registered';
+  clientId: string;
+  serverTime: number;
+}
+
+export interface HeartbeatMessage {
+  type: 'heartbeat';
+  clientId: string;
+  ts: number;
+}
+
+export interface RemoteCommandEnvelope {
+  clientId: string;
+  commandId: string;
+  workspace?: string;
+  action: Action;
+  payload?: Record<string, unknown>;
+  timeoutMs?: number;
+}
+
+export const DEFAULT_WARN_MEMORY_BYTES = 10 * 1024 * 1024;
+export const DEFAULT_HARD_MEMORY_BYTES = 25 * 1024 * 1024;
 
 /** Base reconnect delay for extension WebSocket (ms) */
 export const WS_RECONNECT_BASE_DELAY = 2000;
 /** Max reconnect delay (ms) */
 export const WS_RECONNECT_MAX_DELAY = 60000;
-/** Idle timeout before daemon auto-exits (ms) */
-export const DAEMON_IDLE_TIMEOUT = 5 * 60 * 1000;
+
+export function normalizeBackendUrl(raw: string): string {
+  return raw.trim().replace(/\/+$/, '');
+}
+
+export function toBridgeHealthUrl(raw: string): string {
+  const normalized = normalizeBackendUrl(raw);
+  const url = new URL(normalized);
+  url.protocol = url.protocol === 'https:' ? 'https:' : 'http:';
+  url.pathname = '/health';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
+export function toBridgeWebSocketUrl(raw: string): string {
+  const normalized = normalizeBackendUrl(raw);
+  const url = new URL(normalized);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.pathname = '/agent';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
+export function isRegisteredMessage(value: unknown): value is RegisteredMessage {
+  if (typeof value !== 'object' || value === null) return false;
+  const data = value as Record<string, unknown>;
+  return data.type === 'registered' && typeof data.clientId === 'string' && typeof data.serverTime === 'number';
+}
+
+export function isRemoteCommandEnvelope(value: unknown): value is RemoteCommandEnvelope {
+  if (typeof value !== 'object' || value === null) return false;
+  const data = value as Record<string, unknown>;
+  return typeof data.clientId === 'string'
+    && typeof data.commandId === 'string'
+    && typeof data.action === 'string';
+}
+
+export function commandFromEnvelope(envelope: RemoteCommandEnvelope): Command {
+  const payload = envelope.payload ?? {};
+  return {
+    ...(payload as Partial<Command>),
+    id: envelope.commandId,
+    action: envelope.action,
+    workspace: envelope.workspace,
+  };
+}

@@ -1,13 +1,21 @@
-import { BrowserBridge, CDPBridge } from './browser/index.js';
+import { BrowserBridge, CDPBridge, RemoteBrowserBridge } from './browser/index.js';
 import type { IPage } from './types.js';
 import { TimeoutError } from './errors.js';
 
 /**
  * Returns the appropriate browser factory based on environment config.
- * Uses CDPBridge when OPENCLI_CDP_ENDPOINT is set, otherwise BrowserBridge.
+ * Uses CDPBridge when OPENCLI_CDP_ENDPOINT is set,
+ * RemoteBrowserBridge when OPENCLI_REMOTE_URL is set,
+ * otherwise BrowserBridge.
  */
 export function getBrowserFactory(): new () => IBrowserFactory {
-  return process.env.OPENCLI_CDP_ENDPOINT ? CDPBridge : BrowserBridge;
+  if (process.env.OPENCLI_CDP_ENDPOINT) return CDPBridge;
+  if (process.env.OPENCLI_REMOTE_URL) return RemoteBrowserBridge;
+  return BrowserBridge;
+}
+
+export function isRemoteBrowserMode(): boolean {
+  return !!process.env.OPENCLI_REMOTE_URL && !process.env.OPENCLI_CDP_ENDPOINT;
 }
 
 function parseEnvTimeout(envVar: string, fallback: number): number {

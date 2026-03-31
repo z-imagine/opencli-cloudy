@@ -1,14 +1,49 @@
 //#region src/protocol.ts
-/** Default daemon port */
-var DAEMON_PORT = 19825;
-var DAEMON_HOST = "localhost";
-var DAEMON_WS_URL = `ws://${DAEMON_HOST}:${DAEMON_PORT}/ext`;
-/** Lightweight health-check endpoint — probed before each WebSocket attempt. */
-var DAEMON_PING_URL = `http://${DAEMON_HOST}:${DAEMON_PORT}/ping`;
+var DEFAULT_WARN_MEMORY_BYTES = 10 * 1024 * 1024;
+var DEFAULT_HARD_MEMORY_BYTES = 25 * 1024 * 1024;
 /** Base reconnect delay for extension WebSocket (ms) */
 var WS_RECONNECT_BASE_DELAY = 2e3;
 /** Max reconnect delay (ms) */
 var WS_RECONNECT_MAX_DELAY = 6e4;
+function normalizeBackendUrl(raw) {
+	return raw.trim().replace(/\/+$/, "");
+}
+function toBridgeHealthUrl(raw) {
+	const normalized = normalizeBackendUrl(raw);
+	const url = new URL(normalized);
+	url.protocol = url.protocol === "https:" ? "https:" : "http:";
+	url.pathname = "/health";
+	url.search = "";
+	url.hash = "";
+	return url.toString();
+}
+function toBridgeWebSocketUrl(raw) {
+	const normalized = normalizeBackendUrl(raw);
+	const url = new URL(normalized);
+	url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+	url.pathname = "/agent";
+	url.search = "";
+	url.hash = "";
+	return url.toString();
+}
+function isRegisteredMessage(value) {
+	if (typeof value !== "object" || value === null) return false;
+	const data = value;
+	return data.type === "registered" && typeof data.clientId === "string" && typeof data.serverTime === "number";
+}
+function isRemoteCommandEnvelope(value) {
+	if (typeof value !== "object" || value === null) return false;
+	const data = value;
+	return typeof data.clientId === "string" && typeof data.commandId === "string" && typeof data.action === "string";
+}
+function commandFromEnvelope(envelope) {
+	return {
+		...envelope.payload ?? {},
+		id: envelope.commandId,
+		action: envelope.action,
+		workspace: envelope.workspace
+	};
+}
 //#endregion
 //#region src/cdp.ts
 /**
@@ -154,21 +189,95 @@ function registerListeners() {
 var ws = null;
 var reconnectTimer = null;
 var reconnectAttempts = 0;
+var connectionState = "disconnected";
+var lastError = "";
+var CONFIG_STORAGE_KEYS = [
+	"backendUrl",
+	"token",
+	"clientId"
+];
+var HEARTBEAT_ALARM = "keepalive";
+var configCache = {
+	backendUrl: "",
+	token: "",
+	clientId: ""
+};
+async function hydrateConfig() {
+	const stored = await chrome.storage.local.get(CONFIG_STORAGE_KEYS);
+	configCache.backendUrl = typeof stored.backendUrl === "string" ? normalizeBackendUrl(stored.backendUrl) : "";
+	configCache.token = typeof stored.token === "string" ? stored.token.trim() : "";
+	configCache.clientId = typeof stored.clientId === "string" ? stored.clientId : "";
+	return { ...configCache };
+}
+async function persistConfig(patch) {
+	const next = {
+		backendUrl: patch.backendUrl !== void 0 ? normalizeBackendUrl(patch.backendUrl) : configCache.backendUrl,
+		token: patch.token !== void 0 ? patch.token.trim() : configCache.token,
+		clientId: patch.clientId !== void 0 ? patch.clientId : configCache.clientId
+	};
+	await chrome.storage.local.set(next);
+	configCache.backendUrl = next.backendUrl;
+	configCache.token = next.token;
+	configCache.clientId = next.clientId;
+	return { ...next };
+}
+function hasRemoteBridgeConfig() {
+	return configCache.backendUrl.length > 0 && configCache.token.length > 0;
+}
+function setConnectionState(state, error = "") {
+	connectionState = state;
+	lastError = error;
+}
+async function getStatusPayload() {
+	await hydrateConfig();
+	return {
+		...configCache,
+		connected: ws?.readyState === WebSocket.OPEN,
+		reconnecting: reconnectTimer !== null,
+		state: connectionState,
+		lastError: lastError || void 0
+	};
+}
+function clearReconnectTimer() {
+	if (!reconnectTimer) return;
+	clearTimeout(reconnectTimer);
+	reconnectTimer = null;
+}
+function disconnectSocket() {
+	clearReconnectTimer();
+	if (!ws) {
+		setConnectionState("disconnected");
+		return;
+	}
+	const current = ws;
+	ws = null;
+	current.onopen = null;
+	current.onmessage = null;
+	current.onclose = null;
+	current.onerror = null;
+	try {
+		current.close();
+	} catch {}
+	setConnectionState("disconnected");
+}
+function buildRegisterMessage() {
+	return {
+		type: "register",
+		token: configCache.token,
+		extensionVersion: chrome.runtime.getManifest().version,
+		browserInfo: typeof navigator?.userAgent === "string" ? navigator.userAgent : "unknown",
+		capabilities: {
+			fileInputMemory: true,
+			fileInputDisk: false,
+			warnMemoryBytes: DEFAULT_WARN_MEMORY_BYTES,
+			hardMemoryBytes: DEFAULT_HARD_MEMORY_BYTES
+		}
+	};
+}
 var _origLog = console.log.bind(console);
 var _origWarn = console.warn.bind(console);
 var _origError = console.error.bind(console);
-function forwardLog(level, args) {
-	if (!ws || ws.readyState !== WebSocket.OPEN) return;
-	try {
-		const msg = args.map((a) => typeof a === "string" ? a : JSON.stringify(a)).join(" ");
-		ws.send(JSON.stringify({
-			type: "log",
-			level,
-			msg,
-			ts: Date.now()
-		}));
-	} catch {}
-}
+function forwardLog(level, args) {}
 console.log = (...args) => {
 	_origLog(...args);
 	forwardLog("info", args);
@@ -181,59 +290,88 @@ console.error = (...args) => {
 	_origError(...args);
 	forwardLog("error", args);
 };
-/**
-* Probe the daemon via its /ping HTTP endpoint before attempting a WebSocket
-* connection.  fetch() failures are silently catchable; new WebSocket() is not
-* — Chrome logs ERR_CONNECTION_REFUSED to the extension error page before any
-* JS handler can intercept it.  By keeping the probe inside connect() every
-* call site remains unchanged and the guard can never be accidentally skipped.
-*/
 async function connect() {
 	if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return;
+	await hydrateConfig();
+	if (!hasRemoteBridgeConfig()) {
+		setConnectionState("disconnected");
+		return;
+	}
+	setConnectionState("connecting");
+	const healthUrl = toBridgeHealthUrl(configCache.backendUrl);
+	const wsUrl = toBridgeWebSocketUrl(configCache.backendUrl);
 	try {
-		if (!(await fetch(DAEMON_PING_URL, { signal: AbortSignal.timeout(1e3) })).ok) return;
+		const res = await fetch(healthUrl, { signal: AbortSignal.timeout(1e3) });
+		if (!res.ok) {
+			setConnectionState("disconnected", `Bridge health check failed: ${res.status}`);
+			scheduleReconnect();
+			return;
+		}
 	} catch {
+		setConnectionState("disconnected", "Bridge is unreachable");
+		scheduleReconnect();
 		return;
 	}
 	try {
-		ws = new WebSocket(DAEMON_WS_URL);
+		ws = new WebSocket(wsUrl);
 	} catch {
+		setConnectionState("disconnected", "Failed to create bridge WebSocket");
 		scheduleReconnect();
 		return;
 	}
 	ws.onopen = () => {
-		console.log("[opencli] Connected to daemon");
-		reconnectAttempts = 0;
-		if (reconnectTimer) {
-			clearTimeout(reconnectTimer);
-			reconnectTimer = null;
-		}
-		ws?.send(JSON.stringify({
-			type: "hello",
-			version: chrome.runtime.getManifest().version
-		}));
+		console.log("[opencli] Connected to remote bridge");
+		clearReconnectTimer();
+		ws?.send(JSON.stringify(buildRegisterMessage()));
 	};
 	ws.onmessage = async (event) => {
 		try {
-			const result = await handleCommand(JSON.parse(event.data));
-			ws?.send(JSON.stringify(result));
+			await handleBridgeMessage(event.data);
 		} catch (err) {
 			console.error("[opencli] Message handling error:", err);
 		}
 	};
 	ws.onclose = () => {
-		console.log("[opencli] Disconnected from daemon");
+		console.log("[opencli] Disconnected from remote bridge");
 		ws = null;
+		reconnectAttempts = 0;
+		persistConfig({ clientId: "" });
+		setConnectionState("disconnected", "Bridge connection closed");
 		scheduleReconnect();
 	};
 	ws.onerror = () => {
+		setConnectionState("disconnected", "Bridge WebSocket error");
 		ws?.close();
 	};
 }
+async function handleBridgeMessage(raw) {
+	const parsed = JSON.parse(raw);
+	if (isRegisteredMessage(parsed)) {
+		reconnectAttempts = 0;
+		await persistConfig({ clientId: parsed.clientId });
+		setConnectionState("connected");
+		console.log(`[opencli] Registered with remote bridge as ${parsed.clientId}`);
+		return;
+	}
+	if (isRemoteCommandEnvelope(parsed)) {
+		const envelope = parsed;
+		if (configCache.clientId && envelope.clientId !== configCache.clientId) throw new Error(`Client mismatch: expected ${configCache.clientId}, got ${envelope.clientId}`);
+		const result = await handleCommand(commandFromEnvelope(envelope));
+		ws?.send(JSON.stringify({
+			type: "result",
+			clientId: envelope.clientId,
+			commandId: envelope.commandId,
+			ok: result.ok,
+			data: result.data,
+			error: result.error
+		}));
+		return;
+	}
+	throw new Error("Unsupported bridge message");
+}
 /**
 * After MAX_EAGER_ATTEMPTS (reaching 60s backoff), stop scheduling reconnects.
-* The keepalive alarm (~24s) will still call connect() periodically, but at a
-* much lower frequency — reducing console noise when the daemon is not running.
+* The keepalive alarm (~24s) will still call connect() periodically.
 */
 var MAX_EAGER_ATTEMPTS = 6;
 function scheduleReconnect() {
@@ -245,6 +383,14 @@ function scheduleReconnect() {
 		reconnectTimer = null;
 		connect();
 	}, delay);
+}
+function sendHeartbeat() {
+	if (!ws || ws.readyState !== WebSocket.OPEN || !configCache.clientId) return;
+	ws.send(JSON.stringify({
+		type: "heartbeat",
+		clientId: configCache.clientId,
+		ts: Date.now()
+	}));
 }
 var automationSessions = /* @__PURE__ */ new Map();
 var WINDOW_IDLE_TIMEOUT = 3e4;
@@ -310,11 +456,44 @@ var initialized = false;
 function initialize() {
 	if (initialized) return;
 	initialized = true;
-	chrome.alarms.create("keepalive", { periodInMinutes: .4 });
+	chrome.alarms.create(HEARTBEAT_ALARM, { periodInMinutes: .4 });
 	registerListeners();
-	connect();
+	hydrateConfig().then(() => connect());
 	console.log("[opencli] OpenCLI extension initialized");
 }
+hydrateConfig();
+async function saveRemoteBridgeConfig(backendUrl, token) {
+	disconnectSocket();
+	reconnectAttempts = 0;
+	await persistConfig({
+		backendUrl,
+		token,
+		clientId: ""
+	});
+	if (hasRemoteBridgeConfig()) await connect();
+	else setConnectionState("disconnected");
+	return getStatusPayload();
+}
+function isRuntimeMessage(value) {
+	return typeof value === "object" && value !== null && typeof value.type === "string";
+}
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+	if (!isRuntimeMessage(msg)) return false;
+	if (msg.type === "getStatus") {
+		getStatusPayload().then(sendResponse);
+		return true;
+	}
+	if (msg.type === "saveConfig") {
+		saveRemoteBridgeConfig(typeof msg.backendUrl === "string" ? msg.backendUrl : "", typeof msg.token === "string" ? msg.token : "").then(sendResponse).catch((error) => {
+			sendResponse({
+				ok: false,
+				error: error instanceof Error ? error.message : String(error)
+			});
+		});
+		return true;
+	}
+	return false;
+});
 chrome.runtime.onInstalled.addListener(() => {
 	initialize();
 });
@@ -322,14 +501,12 @@ chrome.runtime.onStartup.addListener(() => {
 	initialize();
 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-	if (alarm.name === "keepalive") connect();
-});
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-	if (msg?.type === "getStatus") sendResponse({
-		connected: ws?.readyState === WebSocket.OPEN,
-		reconnecting: reconnectTimer !== null
-	});
-	return false;
+	if (alarm.name !== HEARTBEAT_ALARM) return;
+	if (ws?.readyState === WebSocket.OPEN) {
+		sendHeartbeat();
+		return;
+	}
+	connect();
 });
 async function handleCommand(cmd) {
 	const workspace = getWorkspaceKey(cmd.workspace);
