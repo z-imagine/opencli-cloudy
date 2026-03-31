@@ -78,6 +78,59 @@ CLI
 - `workspace`
   - 沿用 opencli 现有窗口 / tab 复用语义
 
+### 4.3 阶段 0 冻结结果
+
+为避免后续开发阶段反复改方向，先冻结以下实现决策：
+
+- bridge 服务代码目录
+  - 第一版放在 `src/remote-bridge/`
+  - 入口文件建议为 `src/remote-bridge/main.ts`
+  - 原因：复用当前仓库的 TypeScript 构建、测试和依赖环境，先避免拆独立子项目
+- CLI 配置入口
+  - 全局参数：
+    - `--remote-url`
+    - `--token`
+    - `--client`
+  - 环境变量：
+    - `OPENCLI_REMOTE_URL`
+    - `OPENCLI_REMOTE_TOKEN`
+    - `OPENCLI_REMOTE_CLIENT`
+- 扩展配置存储
+  - 使用 `chrome.storage.local`
+  - 保存项包括：
+    - `backendUrl`
+    - `token`
+    - `clientId`
+    - `connectionStatus`
+- 协议字段冻结
+  - 扩展注册消息使用：
+    - `type: "register"`
+    - `token`
+    - `extensionVersion`
+    - `browserInfo`
+    - `capabilities`
+  - bridge 返回：
+    - `type: "registered"`
+    - `clientId`
+    - `serverTime`
+  - 心跳消息使用：
+    - `type: "heartbeat"`
+    - `clientId`
+    - `ts`
+  - 扩展结果回传使用：
+    - `type: "result"`
+    - `clientId`
+    - `commandId`
+    - `ok`
+    - `data`
+    - `error`
+- 文件注入阈值冻结
+  - `warnMemoryBytes = 10 * 1024 * 1024`
+  - `hardMemoryBytes = 25 * 1024 * 1024`
+- 首个试点 adapter
+  - `src/clis/xiaohongshu/publish.ts`
+  - 原因：已有文件输入选择器和内存注入 fallback，最适合验证远程文件注入链路
+
 ## 5. 协议设计
 
 ### 5.1 扩展注册
