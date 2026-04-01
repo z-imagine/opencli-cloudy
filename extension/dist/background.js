@@ -49,6 +49,99 @@ function isDebuggableUrl$1(url) {
   if (!url) return true;
   return url.startsWith("http://") || url.startsWith("https://") || url === BLANK_PAGE$1;
 }
+function formatBytes(bytes) {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${bytes}B`;
+}
+function buildRemoteFileLimitError(bytes, hardMemoryBytes) {
+  return `memory mode limit exceeded: ${formatBytes(bytes)} > ${formatBytes(hardMemoryBytes)}. disk mode reserved for future implementation`;
+}
+function arrayBufferToBase64(buffer) {
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 32768;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+async function prepareRemoteFilesForInjection(payload, fetchImpl = fetch) {
+  const declaredBytes = payload.remoteFiles.reduce((sum, file) => sum + file.sizeBytes, 0);
+  if (declaredBytes > payload.hardMemoryBytes) {
+    throw new Error(buildRemoteFileLimitError(declaredBytes, payload.hardMemoryBytes));
+  }
+  const warnings = [];
+  if (declaredBytes > payload.warnMemoryBytes) {
+    warnings.push(`memory mode warning threshold exceeded: ${formatBytes(declaredBytes)} > ${formatBytes(payload.warnMemoryBytes)}`);
+  }
+  const files = [];
+  let actualBytes = 0;
+  for (const remoteFile of payload.remoteFiles) {
+    const response = await fetchImpl(remoteFile.url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch remote file "${remoteFile.name}": HTTP ${response.status}`);
+    }
+    const buffer = await response.arrayBuffer();
+    actualBytes += buffer.byteLength;
+    if (actualBytes > payload.hardMemoryBytes) {
+      throw new Error(buildRemoteFileLimitError(actualBytes, payload.hardMemoryBytes));
+    }
+    files.push({
+      name: remoteFile.name,
+      mimeType: remoteFile.mimeType,
+      sizeBytes: buffer.byteLength,
+      base64: arrayBufferToBase64(buffer)
+    });
+  }
+  if (warnings.length === 0 && actualBytes > payload.warnMemoryBytes) {
+    warnings.push(`memory mode warning threshold exceeded: ${formatBytes(actualBytes)} > ${formatBytes(payload.warnMemoryBytes)}`);
+  }
+  return {
+    files,
+    bytes: actualBytes,
+    warnings
+  };
+}
+function buildRemoteFileInjectionExpression(files, selector) {
+  return `
+    (async () => {
+      const files = ${JSON.stringify(files)};
+      const query = ${JSON.stringify(selector || 'input[type="file"]')};
+      const input = document.querySelector(query);
+      if (!input) {
+        return { ok: false, error: \`No element found matching selector: \${query}\` };
+      }
+      if (!(input instanceof HTMLInputElement) || input.type !== 'file') {
+        return { ok: false, error: \`Target is not a file input: \${query}\` };
+      }
+
+      const dt = new DataTransfer();
+      let totalBytes = 0;
+      for (const file of files) {
+        const binary = atob(file.base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        totalBytes += bytes.byteLength;
+        const blob = new Blob([bytes], { type: file.mimeType || 'application/octet-stream' });
+        dt.items.add(new File([blob], file.name, { type: file.mimeType || 'application/octet-stream' }));
+      }
+
+      try {
+        input.files = dt.files;
+      } catch {
+        Object.defineProperty(input, 'files', {
+          configurable: true,
+          value: dt.files,
+        });
+      }
+
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, count: dt.files.length, bytes: totalBytes };
+    })()
+  `;
+}
 async function ensureAttached(tabId) {
   try {
     const tab = await chrome.tabs.get(tabId);
@@ -156,6 +249,22 @@ async function setFileInputFiles(tabId, files, selector) {
     files,
     nodeId: result.nodeId
   });
+}
+async function setRemoteFileInputFiles(tabId, payload) {
+  await ensureAttached(tabId);
+  const prepared = await prepareRemoteFilesForInjection(payload);
+  const result = await evaluateAsync(
+    tabId,
+    buildRemoteFileInjectionExpression(prepared.files, payload.selector)
+  );
+  if (!result?.ok) {
+    throw new Error(result?.error ?? "Remote file injection failed");
+  }
+  return {
+    count: result.count ?? prepared.files.length,
+    bytes: result.bytes ?? prepared.bytes,
+    warnings: prepared.warnings.length > 0 ? prepared.warnings : void 0
+  };
 }
 async function detach(tabId) {
   if (!attached.has(tabId)) return;
@@ -525,6 +634,8 @@ async function handleCommand(cmd) {
         return await handleSessions(cmd);
       case "set-file-input":
         return await handleSetFileInput(cmd, workspace);
+      case "set-file-input-remote":
+        return await handleSetFileInputRemote(cmd, workspace);
       case "bind-current":
         return await handleBindCurrent(cmd, workspace);
       default:
@@ -657,7 +768,7 @@ async function resolveTabId(tabId, workspace) {
   const adoptedTabId = await maybeBindWorkspaceToExistingTab(workspace);
   if (adoptedTabId !== null) return adoptedTabId;
   const existingSession = automationSessions.get(workspace);
-  if (existingSession?.preferredTabId !== null) {
+  if (existingSession && existingSession.preferredTabId !== null) {
     try {
       const preferredTab = await chrome.tabs.get(existingSession.preferredTabId);
       if (isDebuggableUrl(preferredTab.url)) return preferredTab.id;
@@ -895,6 +1006,34 @@ async function handleSetFileInput(cmd, workspace) {
   try {
     await setFileInputFiles(tabId, cmd.files, cmd.selector);
     return { id: cmd.id, ok: true, data: { count: cmd.files.length } };
+  } catch (err) {
+    return { id: cmd.id, ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+function isRemoteFileDescriptor(value) {
+  if (typeof value !== "object" || value === null) return false;
+  const file = value;
+  return typeof file.url === "string" && typeof file.name === "string" && typeof file.mimeType === "string" && typeof file.sizeBytes === "number" && file.sizeBytes >= 0;
+}
+async function handleSetFileInputRemote(cmd, workspace) {
+  if (cmd.mode && cmd.mode !== "memory") {
+    return { id: cmd.id, ok: false, error: "Only memory mode is supported in the first version. disk mode reserved for future implementation" };
+  }
+  if (!cmd.remoteFiles || !Array.isArray(cmd.remoteFiles) || cmd.remoteFiles.length === 0) {
+    return { id: cmd.id, ok: false, error: "Missing or empty remoteFiles array" };
+  }
+  if (!cmd.remoteFiles.every(isRemoteFileDescriptor)) {
+    return { id: cmd.id, ok: false, error: "Invalid remoteFiles payload" };
+  }
+  const tabId = await resolveTabId(cmd.tabId, workspace);
+  try {
+    const data = await setRemoteFileInputFiles(tabId, {
+      remoteFiles: cmd.remoteFiles,
+      selector: cmd.selector,
+      warnMemoryBytes: cmd.warnMemoryBytes ?? DEFAULT_WARN_MEMORY_BYTES,
+      hardMemoryBytes: cmd.hardMemoryBytes ?? DEFAULT_HARD_MEMORY_BYTES
+    });
+    return { id: cmd.id, ok: true, data };
   } catch (err) {
     return { id: cmd.id, ok: false, error: err instanceof Error ? err.message : String(err) };
   }

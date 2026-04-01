@@ -32,8 +32,8 @@
 | 1 | Bridge MVP | 已完成 | 已完成 bridge 服务骨架、注册表、鉴权、客户端列表、命令路由、pending 回收与基础单测 |
 | 2 | CLI Transport 重构 | 已完成 | 已抽象 transport、支持远程模式、补 `opencli clients`、并通过定向单测 |
 | 3 | 扩展远程接入 | 已完成 | 已支持扩展配置远程 bridge、注册拿取 clientId、心跳重连、popup 展示与扩展侧测试 |
-| 4 | 远程文件注入 MVP | 未开始 | |
-| 5 | Adapter 试点接入 | 未开始 | |
+| 4 | 远程文件注入 MVP | 已完成 | 已支持 `set-file-input-remote(memory)`、阈值校验、warning 返回、Page 接口与扩展侧测试 |
+| 5 | Adapter 试点接入 | 进行中 | 已完成小红书试点代码接入与定向测试，待执行真实端到端验证 |
 | 6 | 联调与加固 | 未开始 | |
 
 ## 3. 阶段 0：方案冻结与任务准备
@@ -263,18 +263,18 @@
 
 | 编号 | 子任务 | 说明 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
-| 4.1 | 扩展协议增加新 action | 增加 `set-file-input-remote` 消息结构 | 未开始 | |
-| 4.2 | CLI `IPage` 扩展接口 | 增加远程文件注入方法定义 | 未开始 | |
-| 4.3 | `Page` 实现远程文件注入调用 | 通过 transport 调 bridge 下发新 action | 未开始 | |
-| 4.4 | 扩展实现 `memory` 模式校验 | 检查 `mode`、文件数量、字段完整性 | 未开始 | |
-| 4.5 | 实现大小阈值校验 | 支持 `warnMemoryBytes`、`hardMemoryBytes` | 未开始 | |
-| 4.6 | 实现远程文件抓取 | `fetch(url)` 获取文件内容 | 未开始 | |
-| 4.7 | 实现 `Blob -> File` 构造 | 生成浏览器可用文件对象 | 未开始 | |
-| 4.8 | 实现 `DataTransfer` 注入 | 赋值给目标 `input.files` | 未开始 | |
-| 4.9 | 触发上传相关事件 | 触发 `input` 与 `change` | 未开始 | |
-| 4.10 | 返回执行结果 | 返回 count、bytes、warning 等信息 | 未开始 | |
-| 4.11 | 处理超阈值失败文案 | 明确提示 `disk mode reserved for future implementation` | 未开始 | |
-| 4.12 | 补单元测试 | 覆盖正常注入、warning、error 分支 | 未开始 | |
+| 4.1 | 扩展协议增加新 action | 增加 `set-file-input-remote` 消息结构 | 已完成 | 已补 action、payload 字段与远程文件描述结构 |
+| 4.2 | CLI `IPage` 扩展接口 | 增加远程文件注入方法定义 | 已完成 | 已补 `setRemoteFileInput()` 与结果类型 |
+| 4.3 | `Page` 实现远程文件注入调用 | 通过 transport 调 bridge 下发新 action | 已完成 | 已接入 `set-file-input-remote` |
+| 4.4 | 扩展实现 `memory` 模式校验 | 检查 `mode`、文件数量、字段完整性 | 已完成 | 已拒绝 `disk` 并校验 `remoteFiles` 结构 |
+| 4.5 | 实现大小阈值校验 | 支持 `warnMemoryBytes`、`hardMemoryBytes` | 已完成 | 已支持声明大小预判与实际抓取后兜底校验 |
+| 4.6 | 实现远程文件抓取 | `fetch(url)` 获取文件内容 | 已完成 | 由扩展侧抓取远程 URL |
+| 4.7 | 实现 `Blob -> File` 构造 | 生成浏览器可用文件对象 | 已完成 | 已在注入表达式中重建 `Blob/File` |
+| 4.8 | 实现 `DataTransfer` 注入 | 赋值给目标 `input.files` | 已完成 | 已支持赋值失败时的 `defineProperty` fallback |
+| 4.9 | 触发上传相关事件 | 触发 `input` 与 `change` | 已完成 | |
+| 4.10 | 返回执行结果 | 返回 count、bytes、warning 等信息 | 已完成 | 已回传 `count`、`bytes`、`warnings` |
+| 4.11 | 处理超阈值失败文案 | 明确提示 `disk mode reserved for future implementation` | 已完成 | 已统一错误文案 |
+| 4.12 | 补单元测试 | 覆盖正常注入、warning、error 分支 | 已完成 | 已补 `page.test.ts`、`background.test.ts`、`cdp.test.ts` |
 
 ### 7.2 阶段自检
 
@@ -289,6 +289,24 @@
 - 远程文件注入在标准页面用例中成功
 - 阈值策略行为与方案一致
 
+### 7.4 阶段完成记录
+
+```text
+阶段 4：远程文件注入 MVP
+状态：已完成
+完成时间：2026-04-01
+备注：已完成 set-file-input-remote(memory)、阈值校验、warning 回传、Page 接口接入与扩展/根仓库定向测试
+```
+
+```text
+自检结论：通过
+问题记录：
+- 第一版远程文件抓取仍采用扩展侧内存抓取后再注入页面，适合小到中等文件；大文件 disk 模式仍保留到后续阶段
+- 当前远程文件注入尚未接入真实 adapter，仅完成桥接层与标准 file input 链路
+后续动作：
+- 进入阶段 5：Adapter 试点接入
+```
+
 ## 8. 阶段 5：Adapter 试点接入
 
 阶段目标：
@@ -299,13 +317,13 @@
 
 | 编号 | 子任务 | 说明 | 状态 | 备注 |
 | --- | --- | --- | --- | --- |
-| 5.1 | 梳理试点 adapter 路径 | 确认改造点位于 `xiaohongshu/publish` | 未开始 | |
-| 5.2 | 抽出文件注入选择逻辑 | 明确本地文件注入与远程文件注入的分支 | 未开始 | |
-| 5.3 | 接入远程文件注入方法 | 在试点 adapter 中优先调用新接口 | 未开始 | |
-| 5.4 | 保留现有本地 fallback | 本地模式仍保留原有路径 | 未开始 | |
-| 5.5 | 调整错误提示 | 区分 selector 问题、注入失败、阈值失败 | 未开始 | |
-| 5.6 | 更新试点测试 | 补远程文件注入分支测试 | 未开始 | |
-| 5.7 | 进行一次真实端到端验证 | 远程 CLI + 本地浏览器客户端联调 | 未开始 | |
+| 5.1 | 梳理试点 adapter 路径 | 确认改造点位于 `xiaohongshu/publish` | 已完成 | |
+| 5.2 | 抽出文件注入选择逻辑 | 明确本地文件注入与远程文件注入的分支 | 已完成 | 已支持本地路径/远程 URL 分流 |
+| 5.3 | 接入远程文件注入方法 | 在试点 adapter 中优先调用新接口 | 已完成 | 远程模式优先调用 `setRemoteFileInput()` |
+| 5.4 | 保留现有本地 fallback | 本地模式仍保留原有路径 | 已完成 | 本地 `setFileInput` 和 base64 fallback 保留 |
+| 5.5 | 调整错误提示 | 区分 selector 问题、注入失败、阈值失败 | 已完成 | 已补远程模式本地路径/URL 约束文案 |
+| 5.6 | 更新试点测试 | 补远程文件注入分支测试 | 已完成 | 已补 remote mode 与本地回归测试 |
+| 5.7 | 进行一次真实端到端验证 | 远程 CLI + 本地浏览器客户端联调 | 未开始 | 按当前安排放到后续一起测试 |
 
 ### 8.2 阶段自检
 

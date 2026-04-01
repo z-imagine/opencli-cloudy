@@ -1,5 +1,6 @@
 import { sleep } from '../utils.js';
 import { DEFAULT_DAEMON_PORT } from '../constants.js';
+import type { RemoteFileInputDescriptor } from '../types.js';
 
 export interface BrowserTransport {
   send(action: string, payload?: Record<string, unknown>): Promise<unknown>;
@@ -16,7 +17,7 @@ export interface RemoteClientInfo {
 
 export interface DaemonCommand {
   id: string;
-  action: 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot' | 'close-window' | 'sessions' | 'set-file-input' | 'bind-current';
+  action: 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot' | 'close-window' | 'sessions' | 'set-file-input' | 'set-file-input-remote' | 'bind-current';
   tabId?: number;
   code?: string;
   workspace?: string;
@@ -30,7 +31,11 @@ export interface DaemonCommand {
   quality?: number;
   fullPage?: boolean;
   files?: string[];
+  remoteFiles?: RemoteFileInputDescriptor[];
   selector?: string;
+  mode?: 'memory' | 'disk';
+  warnMemoryBytes?: number;
+  hardMemoryBytes?: number;
 }
 
 interface DaemonResult {

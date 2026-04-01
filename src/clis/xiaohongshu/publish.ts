@@ -20,7 +20,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { cli, Strategy } from '../../registry.js';
-import type { IPage } from '../../types.js';
+import { isRemoteBrowserMode } from '../../runtime.js';
+import type { IPage, RemoteFileInputDescriptor } from '../../types.js';
 
 const PUBLISH_URL = 'https://creator.xiaohongshu.com/publish/publish?from=menu_left';
 const MAX_IMAGES = 9;
@@ -51,6 +52,19 @@ const SUPPORTED_EXTENSIONS: Record<string, string> = {
   '.webp': 'image/webp',
 };
 
+function isRemoteImageUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value);
+}
+
+function getSupportedMimeType(source: string): string {
+  const ext = path.extname(source).toLowerCase();
+  const mimeType = SUPPORTED_EXTENSIONS[ext];
+  if (!mimeType) {
+    throw new Error(`Unsupported image format "${ext}". Supported: jpg, png, gif, webp`);
+  }
+  return mimeType;
+}
+
 /**
  * Validate image paths: check existence and extension.
  * Returns resolved absolute paths.
@@ -59,11 +73,29 @@ function validateImagePaths(filePaths: string[]): string[] {
   return filePaths.map((filePath) => {
     const absPath = path.resolve(filePath);
     if (!fs.existsSync(absPath)) throw new Error(`Image file not found: ${absPath}`);
-    const ext = path.extname(absPath).toLowerCase();
-    if (!SUPPORTED_EXTENSIONS[ext]) {
-      throw new Error(`Unsupported image format "${ext}". Supported: jpg, png, gif, webp`);
-    }
+    getSupportedMimeType(absPath);
     return absPath;
+  });
+}
+
+function validateRemoteImageUrls(fileUrls: string[]): RemoteFileInputDescriptor[] {
+  return fileUrls.map((fileUrl) => {
+    let parsed: URL;
+    try {
+      parsed = new URL(fileUrl);
+    } catch {
+      throw new Error(`Invalid remote image URL: ${fileUrl}`);
+    }
+    const name = decodeURIComponent(path.basename(parsed.pathname));
+    if (!name) {
+      throw new Error(`Remote image URL must end with a filename: ${fileUrl}`);
+    }
+    return {
+      url: parsed.toString(),
+      name,
+      mimeType: getSupportedMimeType(name),
+      sizeBytes: 0,
+    };
   });
 }
 
@@ -84,10 +116,33 @@ const IMAGE_INPUT_SELECTOR = 'input[type="file"][accept*="image"],'
  */
 async function uploadImages(
   page: IPage,
-  absPaths: string[],
+  options: { localPaths?: string[]; remoteFiles?: RemoteFileInputDescriptor[] },
 ): Promise<{ ok: boolean; count: number; error?: string }> {
+  const absPaths = options.localPaths ?? [];
+  const remoteFiles = options.remoteFiles ?? [];
+
   // ── Primary: CDP DOM.setFileInputFiles ──────────────────────────────
-  if (page.setFileInput) {
+  if (remoteFiles.length > 0 && page.setRemoteFileInput) {
+    try {
+      const selector: string | null = await page.evaluate(`
+        (() => {
+          const sels = ${JSON.stringify(IMAGE_INPUT_SELECTOR)};
+          const el = document.querySelector(sels);
+          return el ? sels : null;
+        })()
+      `);
+      if (!selector) {
+        return { ok: false, count: 0, error: 'No file input found on page' };
+      }
+      const result = await page.setRemoteFileInput(remoteFiles, selector, { mode: 'memory' });
+      return { ok: true, count: result.count };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return { ok: false, count: 0, error: msg };
+    }
+  }
+
+  if (absPaths.length > 0 && page.setFileInput) {
     try {
       // Find image-accepting file input on the page
       const selector: string | null = await page.evaluate(`
@@ -113,11 +168,18 @@ async function uploadImages(
     }
   }
 
+  if (remoteFiles.length > 0) {
+    return {
+      ok: false,
+      count: 0,
+      error: 'Remote image injection requires remote bridge support and extension memory upload support',
+    };
+  }
+
   // ── Fallback: legacy base64 DataTransfer injection ─────────────────
   const images = absPaths.map((absPath) => {
     const base64 = fs.readFileSync(absPath).toString('base64');
-    const ext = path.extname(absPath).toLowerCase();
-    return { name: path.basename(absPath), mimeType: SUPPORTED_EXTENSIONS[ext], base64 };
+    return { name: path.basename(absPath), mimeType: getSupportedMimeType(absPath), base64 };
   });
 
   // Warn if total payload is large — this may fail with older extensions
@@ -372,7 +434,7 @@ cli({
   args: [
     { name: 'title', required: true, help: '笔记标题 (最多20字)' },
     { name: 'content', required: true, positional: true, help: '笔记正文' },
-    { name: 'images', required: true, help: '图片路径，逗号分隔，最多9张 (jpg/png/gif/webp)' },
+    { name: 'images', required: true, help: '图片路径或远程 URL，逗号分隔，最多9张 (jpg/png/gif/webp)' },
     { name: 'topics', required: false, help: '话题标签，逗号分隔，不含 # 号' },
     { name: 'draft', type: 'bool', default: false, help: '保存为草稿，不直接发布' },
   ],
@@ -400,8 +462,22 @@ cli({
     if (imagePaths.length > MAX_IMAGES)
       throw new Error(`Too many images: ${imagePaths.length} (max ${MAX_IMAGES})`);
 
-    // Validate image paths before navigating (fast-fail on bad paths / unsupported formats)
-    const absImagePaths = validateImagePaths(imagePaths);
+    const remoteMode = isRemoteBrowserMode();
+    const hasRemoteUrls = imagePaths.some(isRemoteImageUrl);
+    const hasLocalPaths = imagePaths.some((item) => !isRemoteImageUrl(item));
+
+    if (remoteMode && hasLocalPaths) {
+      throw new Error('Remote browser mode currently requires --images to use remote URLs. Local file paths are only supported in local/CDP mode.');
+    }
+    if (!remoteMode && hasRemoteUrls) {
+      throw new Error('Remote image URLs are only supported in remote browser mode.');
+    }
+    if (hasRemoteUrls && hasLocalPaths) {
+      throw new Error('Do not mix local file paths and remote image URLs in the same --images argument.');
+    }
+
+    const absImagePaths = remoteMode ? [] : validateImagePaths(imagePaths);
+    const remoteImageFiles = remoteMode ? validateRemoteImageUrls(imagePaths) : [];
 
     // ── Step 1: Navigate to publish page ──────────────────────────────────────
     await page.goto(PUBLISH_URL);
@@ -431,7 +507,10 @@ cli({
     }
 
     // ── Step 3: Upload images ──────────────────────────────────────────────────
-    const upload = await uploadImages(page, absImagePaths);
+    const upload = await uploadImages(page, {
+      localPaths: absImagePaths,
+      remoteFiles: remoteImageFiles,
+    });
     if (!upload.ok) {
       await page.screenshot({ path: '/tmp/xhs_publish_upload_debug.png' });
       throw new Error(
@@ -586,7 +665,7 @@ cli({
         status: isSuccess ? `✅ ${verb}` : '⚠️ 操作完成，请在浏览器中确认',
         detail: [
           `"${title}"`,
-          `${absImagePaths.length}张图片`,
+          `${upload.count}张图片`,
           topics.length ? `话题: ${topics.join(' ')}` : '',
           successMsg || finalUrl || '',
         ]

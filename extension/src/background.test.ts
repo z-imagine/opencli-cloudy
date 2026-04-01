@@ -473,4 +473,80 @@ describe('background tab isolation', () => {
       }),
     }));
   });
+
+  it('handles remote file input injection with thresholds', async () => {
+    const { chrome } = createChromeMock();
+    vi.stubGlobal('chrome', chrome);
+
+    const cdp = await import('./cdp');
+    const setRemoteFileInputFiles = vi.spyOn(cdp, 'setRemoteFileInputFiles').mockResolvedValue({
+      count: 1,
+      bytes: 2048,
+      warnings: ['memory mode warning threshold exceeded: 2.0KB > 1.0KB'],
+    });
+
+    const mod = await import('./background');
+    mod.__test__.setAutomationWindowId('site:xhs', 1);
+
+    const result = await mod.__test__.handleSetFileInputRemote({
+      id: 'remote-file',
+      action: 'set-file-input-remote',
+      workspace: 'site:xhs',
+      selector: 'input[type="file"]',
+      mode: 'memory',
+      warnMemoryBytes: 1024,
+      hardMemoryBytes: 4096,
+      remoteFiles: [
+        {
+          url: 'https://oss.example.com/a.jpg',
+          name: 'a.jpg',
+          mimeType: 'image/jpeg',
+          sizeBytes: 2048,
+        },
+      ],
+    }, 'site:xhs');
+
+    expect(result).toEqual({
+      id: 'remote-file',
+      ok: true,
+      data: {
+        count: 1,
+        bytes: 2048,
+        warnings: ['memory mode warning threshold exceeded: 2.0KB > 1.0KB'],
+      },
+    });
+    expect(setRemoteFileInputFiles).toHaveBeenCalledWith(1, expect.objectContaining({
+      selector: 'input[type="file"]',
+      warnMemoryBytes: 1024,
+      hardMemoryBytes: 4096,
+      remoteFiles: [expect.objectContaining({ name: 'a.jpg' })],
+    }));
+  });
+
+  it('rejects disk mode in the first remote file injection version', async () => {
+    const { chrome } = createChromeMock();
+    vi.stubGlobal('chrome', chrome);
+
+    const mod = await import('./background');
+    const result = await mod.__test__.handleSetFileInputRemote({
+      id: 'remote-file-disk',
+      action: 'set-file-input-remote',
+      workspace: 'site:xhs',
+      mode: 'disk',
+      remoteFiles: [
+        {
+          url: 'https://oss.example.com/a.jpg',
+          name: 'a.jpg',
+          mimeType: 'image/jpeg',
+          sizeBytes: 2048,
+        },
+      ],
+    }, 'site:xhs');
+
+    expect(result).toEqual({
+      id: 'remote-file-disk',
+      ok: false,
+      error: 'Only memory mode is supported in the first version. disk mode reserved for future implementation',
+    });
+  });
 });

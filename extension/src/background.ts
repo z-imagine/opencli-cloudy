@@ -10,6 +10,7 @@ import type {
   ConnectionState,
   ExtensionConfig,
   RegisterMessage,
+  RemoteFileInputDescriptor,
   RemoteCommandEnvelope,
   Result,
   StatusResponse,
@@ -454,6 +455,8 @@ async function handleCommand(cmd: Command): Promise<Result> {
         return await handleSessions(cmd);
       case 'set-file-input':
         return await handleSetFileInput(cmd, workspace);
+      case 'set-file-input-remote':
+        return await handleSetFileInputRemote(cmd, workspace);
       case 'bind-current':
         return await handleBindCurrent(cmd, workspace);
       default:
@@ -905,6 +908,41 @@ async function handleSetFileInput(cmd: Command, workspace: string): Promise<Resu
   }
 }
 
+function isRemoteFileDescriptor(value: unknown): value is RemoteFileInputDescriptor {
+  if (typeof value !== 'object' || value === null) return false;
+  const file = value as Record<string, unknown>;
+  return typeof file.url === 'string'
+    && typeof file.name === 'string'
+    && typeof file.mimeType === 'string'
+    && typeof file.sizeBytes === 'number'
+    && file.sizeBytes >= 0;
+}
+
+async function handleSetFileInputRemote(cmd: Command, workspace: string): Promise<Result> {
+  if (cmd.mode && cmd.mode !== 'memory') {
+    return { id: cmd.id, ok: false, error: 'Only memory mode is supported in the first version. disk mode reserved for future implementation' };
+  }
+  if (!cmd.remoteFiles || !Array.isArray(cmd.remoteFiles) || cmd.remoteFiles.length === 0) {
+    return { id: cmd.id, ok: false, error: 'Missing or empty remoteFiles array' };
+  }
+  if (!cmd.remoteFiles.every(isRemoteFileDescriptor)) {
+    return { id: cmd.id, ok: false, error: 'Invalid remoteFiles payload' };
+  }
+
+  const tabId = await resolveTabId(cmd.tabId, workspace);
+  try {
+    const data = await executor.setRemoteFileInputFiles(tabId, {
+      remoteFiles: cmd.remoteFiles,
+      selector: cmd.selector,
+      warnMemoryBytes: cmd.warnMemoryBytes ?? DEFAULT_WARN_MEMORY_BYTES,
+      hardMemoryBytes: cmd.hardMemoryBytes ?? DEFAULT_HARD_MEMORY_BYTES,
+    });
+    return { id: cmd.id, ok: true, data };
+  } catch (err) {
+    return { id: cmd.id, ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
 async function handleSessions(cmd: Command): Promise<Result> {
   const now = Date.now();
   const data = await Promise.all([...automationSessions.entries()].map(async ([workspace, session]) => ({
@@ -957,6 +995,7 @@ export const __test__ = {
   getStatusPayload,
   handleBridgeMessage,
   saveRemoteBridgeConfig,
+  handleSetFileInputRemote,
   handleNavigate,
   isTargetUrl,
   handleTabs,

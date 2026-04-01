@@ -11,7 +11,16 @@
  */
 
 import { formatSnapshot } from '../snapshotFormatter.js';
-import type { BrowserCookie, IPage, ScreenshotOptions, SnapshotOptions, WaitOptions } from '../types.js';
+import type {
+  BrowserCookie,
+  IPage,
+  RemoteFileInputDescriptor,
+  RemoteFileInputOptions,
+  RemoteFileInputResult,
+  ScreenshotOptions,
+  SnapshotOptions,
+  WaitOptions,
+} from '../types.js';
 import type { BrowserTransport } from './transport.js';
 import { LocalDaemonTransport } from './transport.js';
 import { wrapForEval } from './utils.js';
@@ -373,6 +382,25 @@ export class Page implements IPage {
     if (!result?.count) {
       throw new Error('setFileInput returned no count — command may not be supported by the extension');
     }
+  }
+
+  async setRemoteFileInput(
+    files: RemoteFileInputDescriptor[],
+    selector?: string,
+    options: RemoteFileInputOptions = {},
+  ): Promise<RemoteFileInputResult> {
+    const result = await this.transport.send('set-file-input-remote', {
+      remoteFiles: files,
+      selector,
+      mode: options.mode ?? 'memory',
+      warnMemoryBytes: options.warnMemoryBytes,
+      hardMemoryBytes: options.hardMemoryBytes,
+      ...this._cmdOpts(),
+    }) as RemoteFileInputResult | undefined;
+    if (!result || typeof result.count !== 'number' || typeof result.bytes !== 'number') {
+      throw new Error('setRemoteFileInput returned an invalid result');
+    }
+    return result;
   }
 
   async waitForCapture(timeout: number = 10): Promise<void> {

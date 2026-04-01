@@ -44,6 +44,25 @@ export interface BrowserSessionInfo {
   [key: string]: unknown;
 }
 
+export interface RemoteFileInputDescriptor {
+  url: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+}
+
+export interface RemoteFileInputOptions {
+  mode?: 'memory' | 'disk';
+  warnMemoryBytes?: number;
+  hardMemoryBytes?: number;
+}
+
+export interface RemoteFileInputResult {
+  count: number;
+  bytes: number;
+  warnings?: string[];
+}
+
 export interface IPage {
   goto(url: string, options?: { waitUntil?: 'load' | 'none'; settleMs?: number }): Promise<void>;
   evaluate(js: string): Promise<any>;
@@ -72,6 +91,15 @@ export interface IPage {
    * Chrome reads the files directly — no base64 encoding or payload size limits.
    */
   setFileInput?(files: string[], selector?: string): Promise<void>;
+  /**
+   * Set remote OSS-style files onto a file input element using in-memory injection.
+   * First version only supports memory mode and reserves disk mode for later.
+   */
+  setRemoteFileInput?(
+    files: RemoteFileInputDescriptor[],
+    selector?: string,
+    options?: RemoteFileInputOptions,
+  ): Promise<RemoteFileInputResult>;
   closeWindow?(): Promise<void>;
   /** Returns the current page URL, or null if unavailable. */
   getCurrentUrl?(): Promise<string | null>;

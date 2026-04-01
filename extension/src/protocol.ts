@@ -2,7 +2,14 @@
  * opencli browser protocol — shared types between extension and remote bridge.
  */
 
-export type Action = 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot' | 'close-window' | 'sessions' | 'set-file-input' | 'bind-current';
+export type Action = 'exec' | 'navigate' | 'tabs' | 'cookies' | 'screenshot' | 'close-window' | 'sessions' | 'set-file-input' | 'set-file-input-remote' | 'bind-current';
+
+export interface RemoteFileInputDescriptor {
+  url: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+}
 
 export interface Command {
   /** Unique request ID */
@@ -35,8 +42,16 @@ export interface Command {
   fullPage?: boolean;
   /** Local file paths for set-file-input action */
   files?: string[];
+  /** Remote file descriptors for set-file-input-remote action */
+  remoteFiles?: RemoteFileInputDescriptor[];
   /** CSS selector for file input element (set-file-input action) */
   selector?: string;
+  /** Upload mode for remote file injection */
+  mode?: 'memory' | 'disk';
+  /** Warning threshold for in-memory injection */
+  warnMemoryBytes?: number;
+  /** Hard threshold for in-memory injection */
+  hardMemoryBytes?: number;
 }
 
 export interface Result {

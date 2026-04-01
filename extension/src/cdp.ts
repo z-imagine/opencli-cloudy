@@ -8,6 +8,31 @@
 
 const attached = new Set<number>();
 
+export interface RemoteFileInjectionPayload {
+  remoteFiles: Array<{
+    url: string;
+    name: string;
+    mimeType: string;
+    sizeBytes: number;
+  }>;
+  selector?: string;
+  warnMemoryBytes: number;
+  hardMemoryBytes: number;
+}
+
+export interface RemoteFileInjectionPreparedFile {
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  base64: string;
+}
+
+export interface RemoteFileInjectionResult {
+  count: number;
+  bytes: number;
+  warnings?: string[];
+}
+
 /** Internal blank page used when no user URL is provided. */
 const BLANK_PAGE = 'data:text/html,<html></html>';
 
@@ -15,6 +40,114 @@ const BLANK_PAGE = 'data:text/html,<html></html>';
 function isDebuggableUrl(url?: string): boolean {
   if (!url) return true;  // empty/undefined = tab still loading, allow it
   return url.startsWith('http://') || url.startsWith('https://') || url === BLANK_PAGE;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${bytes}B`;
+}
+
+export function buildRemoteFileLimitError(bytes: number, hardMemoryBytes: number): string {
+  return `memory mode limit exceeded: ${formatBytes(bytes)} > ${formatBytes(hardMemoryBytes)}. disk mode reserved for future implementation`;
+}
+
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+export async function prepareRemoteFilesForInjection(
+  payload: RemoteFileInjectionPayload,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ files: RemoteFileInjectionPreparedFile[]; bytes: number; warnings: string[] }> {
+  const declaredBytes = payload.remoteFiles.reduce((sum, file) => sum + file.sizeBytes, 0);
+  if (declaredBytes > payload.hardMemoryBytes) {
+    throw new Error(buildRemoteFileLimitError(declaredBytes, payload.hardMemoryBytes));
+  }
+
+  const warnings: string[] = [];
+  if (declaredBytes > payload.warnMemoryBytes) {
+    warnings.push(`memory mode warning threshold exceeded: ${formatBytes(declaredBytes)} > ${formatBytes(payload.warnMemoryBytes)}`);
+  }
+
+  const files: RemoteFileInjectionPreparedFile[] = [];
+  let actualBytes = 0;
+  for (const remoteFile of payload.remoteFiles) {
+    const response = await fetchImpl(remoteFile.url);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch remote file "${remoteFile.name}": HTTP ${response.status}`);
+    }
+    const buffer = await response.arrayBuffer();
+    actualBytes += buffer.byteLength;
+    if (actualBytes > payload.hardMemoryBytes) {
+      throw new Error(buildRemoteFileLimitError(actualBytes, payload.hardMemoryBytes));
+    }
+    files.push({
+      name: remoteFile.name,
+      mimeType: remoteFile.mimeType,
+      sizeBytes: buffer.byteLength,
+      base64: arrayBufferToBase64(buffer),
+    });
+  }
+
+  if (warnings.length === 0 && actualBytes > payload.warnMemoryBytes) {
+    warnings.push(`memory mode warning threshold exceeded: ${formatBytes(actualBytes)} > ${formatBytes(payload.warnMemoryBytes)}`);
+  }
+
+  return {
+    files,
+    bytes: actualBytes,
+    warnings,
+  };
+}
+
+export function buildRemoteFileInjectionExpression(
+  files: RemoteFileInjectionPreparedFile[],
+  selector?: string,
+): string {
+  return `
+    (async () => {
+      const files = ${JSON.stringify(files)};
+      const query = ${JSON.stringify(selector || 'input[type="file"]')};
+      const input = document.querySelector(query);
+      if (!input) {
+        return { ok: false, error: \`No element found matching selector: \${query}\` };
+      }
+      if (!(input instanceof HTMLInputElement) || input.type !== 'file') {
+        return { ok: false, error: \`Target is not a file input: \${query}\` };
+      }
+
+      const dt = new DataTransfer();
+      let totalBytes = 0;
+      for (const file of files) {
+        const binary = atob(file.base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        totalBytes += bytes.byteLength;
+        const blob = new Blob([bytes], { type: file.mimeType || 'application/octet-stream' });
+        dt.items.add(new File([blob], file.name, { type: file.mimeType || 'application/octet-stream' }));
+      }
+
+      try {
+        input.files = dt.files;
+      } catch {
+        Object.defineProperty(input, 'files', {
+          configurable: true,
+          value: dt.files,
+        });
+      }
+
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      return { ok: true, count: dt.files.length, bytes: totalBytes };
+    })()
+  `;
 }
 
 async function ensureAttached(tabId: number): Promise<void> {
@@ -187,6 +320,28 @@ export async function setFileInputFiles(
     files,
     nodeId: result.nodeId,
   });
+}
+
+export async function setRemoteFileInputFiles(
+  tabId: number,
+  payload: RemoteFileInjectionPayload,
+): Promise<RemoteFileInjectionResult> {
+  await ensureAttached(tabId);
+  const prepared = await prepareRemoteFilesForInjection(payload);
+  const result = await evaluateAsync(
+    tabId,
+    buildRemoteFileInjectionExpression(prepared.files, payload.selector),
+  ) as { ok?: boolean; count?: number; bytes?: number; error?: string };
+
+  if (!result?.ok) {
+    throw new Error(result?.error ?? 'Remote file injection failed');
+  }
+
+  return {
+    count: result.count ?? prepared.files.length,
+    bytes: result.bytes ?? prepared.bytes,
+    warnings: prepared.warnings.length > 0 ? prepared.warnings : undefined,
+  };
 }
 
 export async function detach(tabId: number): Promise<void> {
