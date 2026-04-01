@@ -41,13 +41,66 @@ npm update -g @jackwener/opencli
 Browser commands require:
 1. Chrome browser running **(logged into target sites)**
 2. **opencli Browser Bridge** Chrome extension installed (load `extension/` as unpacked in `chrome://extensions`)
-3. No further setup needed — the daemon auto-starts on first browser command
+3. The extension popup must be configured with:
+   - `backendUrl`
+   - `token`
+4. Browser Bridge CLI calls must include:
+   - `--remote-url` or `OPENCLI_REMOTE_URL`
+   - `--token` or `OPENCLI_REMOTE_TOKEN`
+   - `--client` or `OPENCLI_REMOTE_CLIENT`
 
 > **Note**: You must be logged into the target website in Chrome before running commands. Tabs opened during command execution are auto-closed afterwards.
+> **Bridge Note**: `clientId` is assigned by the bridge after the extension registers successfully. Use `opencli clients --remote-url ... --token ...` to discover available clients before executing browser commands against a specific browser client.
 
 Public API commands (`hackernews`, `v2ex`) need no browser.
 
+## Browser Bridge Quick Reference
+
+Use Browser Bridge routing for all browser commands. Even in single-machine deployment, follow the same explicit configuration and routing model.
+
+Required extension settings:
+
+- `backendUrl`
+- `token`
+
+Required CLI parameters:
+
+- `--remote-url` or `OPENCLI_REMOTE_URL`
+- `--token` or `OPENCLI_REMOTE_TOKEN`
+- `--client` or `OPENCLI_REMOTE_CLIENT`
+
+Recommended flow:
+
+```bash
+# 1) Start remote bridge
+OPENCLI_REMOTE_BRIDGE_TOKEN=your-token npm run remote-bridge:dev
+
+# 2) Configure the extension popup
+#    backendUrl = http://127.0.0.1:19826
+#    token = your-token
+
+# 3) Discover online browser clients
+opencli clients --remote-url http://127.0.0.1:19826 --token your-token
+
+# 4) Execute against one clientId
+opencli --remote-url http://127.0.0.1:19826 --token your-token --client cli_xxx bilibili hot --limit 5
+```
+
+Important:
+
+- `opencli doctor` is only a connectivity diagnostic helper. It does not replace `--remote-url` / `--token` / `--client`.
+- For `xiaohongshu publish`, the current bridge upload path expects `--images` to be remote URLs rather than local file paths.
+
 ## Commands Reference
+
+> [!IMPORTANT]
+> For all browser command examples below, always provide Browser Bridge routing parameters:
+> `--remote-url <bridge-url> --token <token> --client <clientId>`
+>
+> Or set the equivalent environment variables first:
+> `OPENCLI_REMOTE_URL` / `OPENCLI_REMOTE_TOKEN` / `OPENCLI_REMOTE_CLIENT`
+>
+> Public API commands (`hackernews`, `v2ex`, etc.) do not need these parameters.
 
 ### Data Commands
 

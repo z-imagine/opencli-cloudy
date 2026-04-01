@@ -25,7 +25,7 @@ A CLI tool that turns **any website**, **Electron app**, or **local CLI tool** i
 - **Anti-detection built-in** — Patches `navigator.webdriver`, stubs `window.chrome`, fakes plugin lists, cleans ChromeDriver/Playwright globals, and strips CDP frames from Error stack traces. Extensive anti-fingerprinting and risk-control evasion measures baked in at every layer.
 - **AI Agent ready** — `explore` discovers APIs, `synthesize` generates adapters, `cascade` finds auth strategies.
 - **External CLI Hub** — Discover, auto-install, and passthrough commands to any external CLI (gh, obsidian, docker, etc). Zero setup.
-- **Self-healing setup** — `opencli doctor` diagnoses and auto-starts the daemon, extension, and live browser connectivity.
+- **Self-healing setup** — `opencli doctor` diagnoses bridge connectivity and extension health.
 - **Dynamic Loader** — Simply drop `.ts` or `.yaml` adapters into the `clis/` folder for auto-registration.
 - **Dual-Engine Architecture** — Supports both YAML declarative data pipelines and robust browser runtime TypeScript injections.
 
@@ -55,7 +55,7 @@ There are many great browser automation tools. Here's when opencli is the right 
 
 ### 1. Install Browser Bridge Extension
 
-> OpenCLI connects to your browser through a lightweight **Browser Bridge** Chrome Extension + micro-daemon (zero config, auto-start).
+> OpenCLI uses a unified Browser Bridge architecture. For browser commands, use one explicit bridge configuration model everywhere: extension-side `backendUrl` + `token`, CLI-side `--remote-url` + `--token` + `--client`.
 
 1. Go to the GitHub [Releases page](https://github.com/jackwener/opencli/releases) and download the latest `opencli-extension.zip`.
 2. Unzip the file and open `chrome://extensions`, enable **Developer mode** (top-right toggle).
@@ -80,8 +80,46 @@ opencli doctor   # Check extension + daemon connectivity
 ```bash
 opencli list                           # See all commands
 opencli hackernews top --limit 5       # Public API, no browser needed
-opencli bilibili hot --limit 5         # Browser command (requires Extension)
+opencli --remote-url http://127.0.0.1:19826 --token your-token --client cli_xxx bilibili hot --limit 5
 ```
+
+### 4. Browser Bridge Routing
+
+OpenCLI browser commands are routed through Browser Bridge. The CLI must explicitly identify the target bridge endpoint and browser client in all documented setups.
+
+Required CLI parameters:
+
+- `--remote-url` or `OPENCLI_REMOTE_URL`
+- `--token` or `OPENCLI_REMOTE_TOKEN`
+- `--client` or `OPENCLI_REMOTE_CLIENT`
+
+Required extension settings:
+
+- `backendUrl`
+- `token`
+
+Recommended flow:
+
+```bash
+# 1) Start remote bridge server
+OPENCLI_REMOTE_BRIDGE_TOKEN=your-token npm run remote-bridge:dev
+
+# 2) In the extension popup, set:
+#    backendUrl = http://127.0.0.1:19826
+#    token = your-token
+
+# 3) List online clients
+opencli clients --remote-url http://127.0.0.1:19826 --token your-token
+
+# 4) Run a command against one clientId
+opencli --remote-url http://127.0.0.1:19826 --token your-token --client cli_xxx bilibili hot --limit 5
+```
+
+Notes:
+
+- `clientId` is assigned by the remote bridge after the extension registers successfully.
+- `opencli doctor` is only a connectivity diagnostic helper. It does not replace `--remote-url` / `--token` / `--client`.
+- For `xiaohongshu publish`, the current bridge upload path expects `--images` to be remote URLs, not local file paths.
 
 ### Update
 
@@ -112,8 +150,18 @@ git clone git@github.com:jackwener/opencli.git && cd opencli && npm install && n
 - **Chrome** running **and logged into the target site** (e.g. bilibili.com, zhihu.com, xiaohongshu.com).
 
 > **⚠️ Important**: Browser commands reuse your Chrome login session. You must be logged into the target website in Chrome before running commands. If you get empty data or errors, check your login status first.
+> Browser Bridge usage requires configured `backendUrl` and `token` in the extension, and `--remote-url` / `--token` / `--client` on the CLI side.
 
 ## Built-in Commands
+
+> [!IMPORTANT]
+> For all browser command examples and browser adapters, provide Browser Bridge routing parameters:
+> `--remote-url <bridge-url> --token <token> --client <clientId>`
+>
+> Or set:
+> `OPENCLI_REMOTE_URL` / `OPENCLI_REMOTE_TOKEN` / `OPENCLI_REMOTE_CLIENT`
+>
+> Public API commands do not need these parameters.
 
 | Site | Commands |
 |------|----------|
