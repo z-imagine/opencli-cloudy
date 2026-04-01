@@ -199,7 +199,6 @@ async function connect(): Promise<void> {
     console.log('[opencli] Disconnected from remote bridge');
     ws = null;
     reconnectAttempts = 0;
-    void persistConfig({ clientId: '' });
     setConnectionState('disconnected', 'Bridge connection closed');
     scheduleReconnect();
   };

@@ -46,6 +46,28 @@
       white-space: pre-line;
       line-height: 1.5;
     }
+    .status-grid {
+      margin-top: 10px;
+      display: grid;
+      gap: 6px;
+    }
+    .status-item {
+      display: grid;
+      gap: 2px;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: #f7f7f7;
+    }
+    .status-item label {
+      font-size: 11px;
+      color: #777;
+    }
+    .status-item code {
+      font-size: 11px;
+      color: #222;
+      word-break: break-all;
+      white-space: pre-wrap;
+    }
     .form {
       margin-top: 14px;
       display: grid;
@@ -131,6 +153,16 @@
     <div class="status-text">
       <div id="status"><strong>正在检查连接状态...</strong></div>
       <div class="status-meta" id="meta"></div>
+    </div>
+  </div>
+  <div class="status-grid">
+    <div class="status-item">
+      <label>后端</label>
+      <code id="backend-display">未配置</code>
+    </div>
+    <div class="status-item">
+      <label>clientId</label>
+      <code id="client-id-display">未分配</code>
     </div>
   </div>
   <form class="form" id="config-form">

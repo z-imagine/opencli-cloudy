@@ -7,6 +7,9 @@ const backendUrlInput = document.getElementById('backend-url');
 const tokenInput = document.getElementById('token');
 const saveButton = document.getElementById('save');
 const saveStatus = document.getElementById('save-status');
+const backendDisplay = document.getElementById('backend-display');
+const clientIdDisplay = document.getElementById('client-id-display');
+let refreshTimer = null;
 
 function setSaveStatus(message, isError = false) {
   saveStatus.textContent = message;
@@ -16,6 +19,8 @@ function setSaveStatus(message, isError = false) {
 function renderStatus(resp) {
   backendUrlInput.value = resp.backendUrl || '';
   tokenInput.value = resp.token || '';
+  backendDisplay.textContent = resp.backendUrl || '未配置';
+  clientIdDisplay.textContent = resp.clientId || '未分配';
 
   if (resp.connected) {
     dot.className = 'dot connected';
@@ -29,8 +34,6 @@ function renderStatus(resp) {
   }
 
   const lines = [];
-  if (resp.backendUrl) lines.push(`后端：${resp.backendUrl}`);
-  if (resp.clientId) lines.push(`clientId：${resp.clientId}`);
   if (!resp.token) lines.push('固定 Token：未配置');
   if (resp.lastError) lines.push(`错误：${resp.lastError}`);
   meta.textContent = lines.join('\n');
@@ -43,11 +46,18 @@ function fetchStatus() {
       dot.className = 'dot disconnected';
       status.innerHTML = '<strong>无法读取扩展状态</strong>';
       meta.textContent = chrome.runtime.lastError?.message || '';
+      backendDisplay.textContent = backendUrlInput.value || '未配置';
+      clientIdDisplay.textContent = '未分配';
       hint.style.display = 'block';
       return;
     }
     renderStatus(resp);
   });
+}
+
+function startStatusPolling() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(fetchStatus, 1000);
 }
 
 form.addEventListener('submit', (event) => {
@@ -71,3 +81,4 @@ form.addEventListener('submit', (event) => {
 });
 
 fetchStatus();
+startStatusPolling();
