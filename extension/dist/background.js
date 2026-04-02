@@ -1,3 +1,6 @@
+function createClientId() {
+  return `cli_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
 const DEFAULT_WARN_MEMORY_BYTES = 10 * 1024 * 1024;
 const DEFAULT_HARD_MEMORY_BYTES = 25 * 1024 * 1024;
 const WS_RECONNECT_BASE_DELAY = 2e3;
@@ -303,11 +306,20 @@ const configCache = {
   token: "",
   clientId: ""
 };
+async function ensureClientId() {
+  if (configCache.clientId) return configCache.clientId;
+  const clientId = createClientId();
+  await persistConfig({ clientId });
+  return clientId;
+}
 async function hydrateConfig() {
   const stored = await chrome.storage.local.get(CONFIG_STORAGE_KEYS);
   configCache.backendUrl = typeof stored.backendUrl === "string" ? normalizeBackendUrl(stored.backendUrl) : "";
   configCache.token = typeof stored.token === "string" ? stored.token.trim() : "";
   configCache.clientId = typeof stored.clientId === "string" ? stored.clientId : "";
+  if (!configCache.clientId) {
+    await ensureClientId();
+  }
   return { ...configCache };
 }
 async function persistConfig(patch) {
@@ -365,6 +377,7 @@ function disconnectSocket() {
 function buildRegisterMessage() {
   return {
     type: "register",
+    clientId: configCache.clientId,
     token: configCache.token,
     extensionVersion: chrome.runtime.getManifest().version,
     browserInfo: typeof navigator?.userAgent === "string" ? navigator.userAgent : "unknown",
@@ -568,8 +581,7 @@ async function saveRemoteBridgeConfig(backendUrl, token) {
   reconnectAttempts = 0;
   await persistConfig({
     backendUrl,
-    token,
-    clientId: ""
+    token
   });
   if (hasRemoteBridgeConfig()) {
     await connect();

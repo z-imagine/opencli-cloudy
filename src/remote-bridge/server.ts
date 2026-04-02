@@ -42,6 +42,13 @@ function sendCommandToClient(ws: WebSocket, envelope: CommandEnvelope): void {
   ws.send(JSON.stringify(envelope));
 }
 
+function formatRawPayload(raw: RawData): string {
+  if (typeof raw === 'string') return raw;
+  if (raw instanceof ArrayBuffer) return Buffer.from(raw).toString('utf8');
+  if (Array.isArray(raw)) return Buffer.concat(raw.map((chunk) => Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))).toString('utf8');
+  return raw.toString();
+}
+
 export function createRemoteBridgeServer(options: RemoteBridgeServerOptions): RemoteBridgeServer {
   const logger = options.logger ?? console;
   const port = options.port ?? DEFAULT_REMOTE_BRIDGE_PORT;
@@ -119,8 +126,9 @@ export function createRemoteBridgeServer(options: RemoteBridgeServerOptions): Re
   });
 
   async function handleAgentMessage(ws: WebSocket, raw: RawData): Promise<void> {
+    const payload = formatRawPayload(raw);
     try {
-      const msg = parseAgentMessage(raw.toString());
+      const msg = parseAgentMessage(payload);
       if (msg.type === 'register') {
         if (!isAuthorizedToken(msg.token, options.token)) {
           ws.close(4001, 'Unauthorized');
@@ -138,7 +146,11 @@ export function createRemoteBridgeServer(options: RemoteBridgeServerOptions): Re
           serverTime: Date.now(),
         };
         ws.send(JSON.stringify(response));
-        logger.log(`[remote-bridge] registered client ${record.clientId}`);
+        if (msg.clientId) {
+          logger.log(`[remote-bridge] registered client ${record.clientId} (persistent clientId from extension)`);
+        } else {
+          logger.warn(`[remote-bridge] registered client ${record.clientId} without extension clientId; using ephemeral fallback id`);
+        }
         return;
       }
 
@@ -152,7 +164,8 @@ export function createRemoteBridgeServer(options: RemoteBridgeServerOptions): Re
         registry.settlePending(msg);
       }
     } catch (error) {
-      logger.warn(`[remote-bridge] failed to handle agent message: ${error instanceof Error ? error.message : String(error)}`);
+      const detail = error instanceof Error ? error.message : String(error);
+      logger.warn(`[remote-bridge] failed to handle agent message: ${detail}; payload=${payload.slice(0, 500)}`);
     }
   }
 
