@@ -146,11 +146,7 @@ export function createRemoteBridgeServer(options: RemoteBridgeServerOptions): Re
           serverTime: Date.now(),
         };
         ws.send(JSON.stringify(response));
-        if (msg.clientId) {
-          logger.log(`[remote-bridge] registered client ${record.clientId} (persistent clientId from extension)`);
-        } else {
-          logger.warn(`[remote-bridge] registered client ${record.clientId} without extension clientId; using ephemeral fallback id`);
-        }
+        logger.log(`[remote-bridge] registered client ${record.clientId} (persistent clientId from extension)`);
         return;
       }
 

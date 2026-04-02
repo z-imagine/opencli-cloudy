@@ -16,15 +16,9 @@ export class RemoteBridgeRegistry {
   private clients = new Map<string, ClientEntry>();
   private sockets = new Map<WebSocket, string>();
   private pending = new Map<string, PendingCommand>();
-  private idCounter = 0;
-
-  nextClientId(): string {
-    this.idCounter += 1;
-    return `cli_${Date.now().toString(36)}_${this.idCounter.toString(36)}`;
-  }
 
   registerClient(ws: WebSocket, meta: {
-    clientId?: string;
+    clientId: string;
     extensionVersion?: string;
     browserInfo?: string;
     capabilities: ClientCapabilities;
@@ -33,7 +27,7 @@ export class RemoteBridgeRegistry {
     if (existing) this.unregisterSocket(ws);
 
     const now = Date.now();
-    const clientId = meta.clientId?.trim() || this.nextClientId();
+    const clientId = meta.clientId.trim();
     const existingClient = this.clients.get(clientId);
     if (existingClient) {
       this.unregisterSocket(existingClient.ws);

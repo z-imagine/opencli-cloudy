@@ -122,27 +122,4 @@ describe('remote bridge server', () => {
     ]);
     second.ws.close();
   });
-
-  it('accepts legacy register messages without clientId', async () => {
-    const ws = new WebSocket('ws://127.0.0.1:19866/agent');
-    const registered = await new Promise<any>((resolve, reject) => {
-      ws.once('open', () => {
-        ws.send(JSON.stringify({
-          type: 'register',
-          token: 'secret',
-          extensionVersion: '1.0.0',
-          browserInfo: 'Chrome Test',
-          capabilities: { fileInputMemory: true, fileInputDisk: false },
-        }));
-      });
-      ws.on('message', (raw) => {
-        const msg = JSON.parse(raw.toString());
-        if (msg.type === 'registered') resolve(msg);
-      });
-      ws.once('error', reject);
-    });
-
-    expect(registered.clientId).toMatch(/^cli_/);
-    ws.close();
-  });
 });

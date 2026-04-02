@@ -9,7 +9,7 @@ export interface ClientCapabilities {
 
 export interface RegisterMessage {
   type: 'register';
-  clientId?: string;
+  clientId: string;
   token: string;
   extensionVersion?: string;
   browserInfo?: string;
@@ -68,15 +68,16 @@ export function parseAgentMessage(raw: string): AgentMessage {
   }
   switch (parsed.type) {
     case 'register':
-      if (typeof parsed.token !== 'string' || !isRecord(parsed.capabilities)) {
+      if (typeof parsed.clientId !== 'string' || typeof parsed.token !== 'string' || !isRecord(parsed.capabilities)) {
         const problems: string[] = [];
+        if (typeof parsed.clientId !== 'string') problems.push('missing clientId');
         if (typeof parsed.token !== 'string') problems.push('missing token');
         if (!isRecord(parsed.capabilities)) problems.push('missing capabilities');
         throw new Error(`Invalid register message: ${problems.join(', ') || 'bad payload'}`);
       }
       return {
         type: 'register',
-        clientId: typeof parsed.clientId === 'string' ? parsed.clientId : undefined,
+        clientId: parsed.clientId,
         token: parsed.token,
         extensionVersion: typeof parsed.extensionVersion === 'string' ? parsed.extensionVersion : undefined,
         browserInfo: typeof parsed.browserInfo === 'string' ? parsed.browserInfo : undefined,
