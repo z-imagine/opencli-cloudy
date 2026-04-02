@@ -424,14 +424,14 @@ describe('background tab isolation', () => {
     const mod = await import('./background');
     const status = await mod.__test__.saveRemoteBridgeConfig('https://bridge.example.com/', 'secret-token');
 
-    expect(chrome.storage.local.set).toHaveBeenCalledWith({
+    expect(chrome.storage.local.set).toHaveBeenLastCalledWith({
       backendUrl: 'https://bridge.example.com',
       token: 'secret-token',
-      clientId: '',
+      clientId: expect.any(String),
     });
     expect(status.backendUrl).toBe('https://bridge.example.com');
     expect(status.token).toBe('secret-token');
-    expect(status.clientId).toBe('');
+    expect(status.clientId).toMatch(/^cli_/);
   });
 
   it('records clientId after registered message', async () => {
@@ -466,12 +466,28 @@ describe('background tab isolation', () => {
     expect(socket!.sent).toHaveLength(1);
     expect(JSON.parse(socket!.sent[0])).toEqual(expect.objectContaining({
       type: 'register',
+      clientId: expect.stringMatching(/^cli_/),
       token: 'secret-token',
       capabilities: expect.objectContaining({
         fileInputMemory: true,
         fileInputDisk: false,
       }),
     }));
+  });
+
+  it('reuses the stored clientId across reconnect registration', async () => {
+    const { chrome } = createChromeMock();
+    chrome.storage.local._store.clientId = 'cli_stable_browser_1';
+    vi.stubGlobal('chrome', chrome);
+
+    const mod = await import('./background');
+    await mod.__test__.saveRemoteBridgeConfig('https://bridge.example.com', 'secret-token');
+    const socket = MockWebSocket.instances.at(-1);
+    socket!.readyState = MockWebSocket.OPEN;
+    socket!.onopen?.();
+
+    const registerPayload = JSON.parse(socket!.sent[0]);
+    expect(registerPayload.clientId).toBe('cli_stable_browser_1');
   });
 
   it('handles remote file input injection with thresholds', async () => {

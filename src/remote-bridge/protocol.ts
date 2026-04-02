@@ -9,6 +9,7 @@ export interface ClientCapabilities {
 
 export interface RegisterMessage {
   type: 'register';
+  clientId: string;
   token: string;
   extensionVersion?: string;
   browserInfo?: string;
@@ -67,11 +68,12 @@ export function parseAgentMessage(raw: string): AgentMessage {
   }
   switch (parsed.type) {
     case 'register':
-      if (typeof parsed.token !== 'string' || !isRecord(parsed.capabilities)) {
+      if (typeof parsed.clientId !== 'string' || typeof parsed.token !== 'string' || !isRecord(parsed.capabilities)) {
         throw new Error('Invalid register message');
       }
       return {
         type: 'register',
+        clientId: parsed.clientId,
         token: parsed.token,
         extensionVersion: typeof parsed.extensionVersion === 'string' ? parsed.extensionVersion : undefined,
         browserInfo: typeof parsed.browserInfo === 'string' ? parsed.browserInfo : undefined,

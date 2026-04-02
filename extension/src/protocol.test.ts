@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { commandFromEnvelope, toBridgeHealthUrl, toBridgeWebSocketUrl } from './protocol';
+import { commandFromEnvelope, createClientId, toBridgeHealthUrl, toBridgeWebSocketUrl } from './protocol';
 
 describe('extension protocol helpers', () => {
   it('derives bridge endpoints from backend url', () => {
@@ -24,5 +24,9 @@ describe('extension protocol helpers', () => {
       workspace: 'site:xiaohongshu',
       url: 'https://example.com',
     });
+  });
+
+  it('creates stable-looking client ids', () => {
+    expect(createClientId()).toMatch(/^cli_[a-f0-9]{12}$/);
   });
 });

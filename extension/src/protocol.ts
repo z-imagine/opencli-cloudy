@@ -71,6 +71,10 @@ export interface ExtensionConfig {
   clientId: string;
 }
 
+export function createClientId(): string {
+  return `cli_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+}
+
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected';
 
 export interface StatusResponse extends ExtensionConfig {
@@ -82,6 +86,7 @@ export interface StatusResponse extends ExtensionConfig {
 
 export interface RegisterMessage {
   type: 'register';
+  clientId: string;
   token: string;
   extensionVersion?: string;
   browserInfo?: string;

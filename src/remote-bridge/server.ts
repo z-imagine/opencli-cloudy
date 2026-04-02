@@ -127,6 +127,7 @@ export function createRemoteBridgeServer(options: RemoteBridgeServerOptions): Re
           return;
         }
         const record = registry.registerClient(ws, {
+          clientId: msg.clientId,
           extensionVersion: msg.extensionVersion,
           browserInfo: msg.browserInfo,
           capabilities: msg.capabilities,

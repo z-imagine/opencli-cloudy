@@ -24,6 +24,7 @@ export class RemoteBridgeRegistry {
   }
 
   registerClient(ws: WebSocket, meta: {
+    clientId?: string;
     extensionVersion?: string;
     browserInfo?: string;
     capabilities: ClientCapabilities;
@@ -32,7 +33,11 @@ export class RemoteBridgeRegistry {
     if (existing) this.unregisterSocket(ws);
 
     const now = Date.now();
-    const clientId = this.nextClientId();
+    const clientId = meta.clientId?.trim() || this.nextClientId();
+    const existingClient = this.clients.get(clientId);
+    if (existingClient) {
+      this.unregisterSocket(existingClient.ws);
+    }
     const entry: ClientEntry = {
       clientId,
       ws,

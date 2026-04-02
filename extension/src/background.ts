@@ -16,6 +16,7 @@ import type {
   StatusResponse,
 } from './protocol';
 import {
+  createClientId,
   DEFAULT_HARD_MEMORY_BYTES,
   DEFAULT_WARN_MEMORY_BYTES,
   WS_RECONNECT_BASE_DELAY,
@@ -46,11 +47,21 @@ const configCache: ExtensionConfig = {
   clientId: '',
 };
 
+async function ensureClientId(): Promise<string> {
+  if (configCache.clientId) return configCache.clientId;
+  const clientId = createClientId();
+  await persistConfig({ clientId });
+  return clientId;
+}
+
 async function hydrateConfig(): Promise<ExtensionConfig> {
   const stored = await chrome.storage.local.get(CONFIG_STORAGE_KEYS);
   configCache.backendUrl = typeof stored.backendUrl === 'string' ? normalizeBackendUrl(stored.backendUrl) : '';
   configCache.token = typeof stored.token === 'string' ? stored.token.trim() : '';
   configCache.clientId = typeof stored.clientId === 'string' ? stored.clientId : '';
+  if (!configCache.clientId) {
+    await ensureClientId();
+  }
   return { ...configCache };
 }
 
@@ -116,6 +127,7 @@ function disconnectSocket(): void {
 function buildRegisterMessage(): RegisterMessage {
   return {
     type: 'register',
+    clientId: configCache.clientId,
     token: configCache.token,
     extensionVersion: chrome.runtime.getManifest().version,
     browserInfo: typeof navigator?.userAgent === 'string' ? navigator.userAgent : 'unknown',
@@ -379,7 +391,6 @@ async function saveRemoteBridgeConfig(backendUrl: string, token: string): Promis
   await persistConfig({
     backendUrl,
     token,
-    clientId: '',
   });
   if (hasRemoteBridgeConfig()) {
     await connect();

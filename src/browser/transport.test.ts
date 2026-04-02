@@ -32,6 +32,7 @@ describe('browser transport', () => {
       ws.once('open', () => {
         ws.send(JSON.stringify({
           type: 'register',
+          clientId: 'cli_transport_1',
           token: 'secret',
           extensionVersion: '1.0.0',
           browserInfo: 'Chrome Test',
@@ -58,6 +59,7 @@ describe('browser transport', () => {
       ws.once('open', () => {
         ws.send(JSON.stringify({
           type: 'register',
+          clientId: 'cli_transport_2',
           token: 'secret',
           extensionVersion: '1.0.0',
           browserInfo: 'Chrome Test',

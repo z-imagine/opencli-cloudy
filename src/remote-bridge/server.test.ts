@@ -31,6 +31,7 @@ describe('remote bridge server', () => {
       ws.once('open', () => {
         ws.send(JSON.stringify({
           type: 'register',
+          clientId: 'cli_browser_a',
           token: 'secret',
           extensionVersion: '1.0.0',
           browserInfo: 'Chrome Test',
@@ -81,5 +82,44 @@ describe('remote bridge server', () => {
     expect(payload.ok).toBe(true);
     expect(payload.data).toEqual({ title: 'ok' });
     ws.close();
+  });
+
+  it('keeps the same clientId when the extension reconnects', async () => {
+    const register = async () => {
+      const ws = new WebSocket('ws://127.0.0.1:19866/agent');
+      const registered = await new Promise<any>((resolve, reject) => {
+        ws.once('open', () => {
+          ws.send(JSON.stringify({
+            type: 'register',
+            clientId: 'cli_browser_stable',
+            token: 'secret',
+            extensionVersion: '1.0.0',
+            browserInfo: 'Chrome Test',
+            capabilities: { fileInputMemory: true, fileInputDisk: false },
+          }));
+        });
+        ws.on('message', (raw) => {
+          const msg = JSON.parse(raw.toString());
+          if (msg.type === 'registered') resolve({ ws, msg });
+        });
+        ws.once('error', reject);
+      });
+      return registered;
+    };
+
+    const first = await register();
+    expect(first.msg.clientId).toBe('cli_browser_stable');
+    first.ws.close();
+
+    const second = await register();
+    expect(second.msg.clientId).toBe('cli_browser_stable');
+
+    const clients = await fetch('http://127.0.0.1:19866/api/clients', {
+      headers: { Authorization: 'Bearer secret' },
+    });
+    expect(await clients.json()).toEqual([
+      expect.objectContaining({ clientId: 'cli_browser_stable' }),
+    ]);
+    second.ws.close();
   });
 });
