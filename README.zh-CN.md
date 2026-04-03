@@ -116,7 +116,7 @@ CLI 侧必填参数：
 - `backendUrl`
 - `token`
 
-推荐使用流程：
+手工配置示例：
 
 ```bash
 # 1）启动远程 bridge
@@ -126,16 +126,16 @@ OPENCLI_REMOTE_BRIDGE_TOKEN=your-token npm run remote-bridge:dev
 #    backendUrl = http://127.0.0.1:19826
 #    token = your-token
 
-# 3）查看在线客户端
-opencli clients --remote-url http://127.0.0.1:19826 --token your-token
-
-# 4）指定某个 clientId 执行命令
-opencli --remote-url http://127.0.0.1:19826 --token your-token --client cli_xxx bilibili hot --limit 5
+# 3）使用调用方已提供的 clientId 执行命令
+opencli --remote-url http://127.0.0.1:19826 --token your-token --client <clientId> bilibili hot --limit 5
 ```
 
 说明：
 
-- `clientId` 由 bridge 在扩展注册成功后动态分配
+- 浏览器命令必须传 `--client`
+- 不要臆造、猜测或占位填写 `clientId`
+- 如果还不知道 `clientId`，停止执行并让调用方提供
+- 除非用户明确要求列出客户端或排查 Bridge 连通性，否则不要自动执行 `opencli clients`
 - `opencli doctor` 只是连通性诊断工具，不能替代 `--remote-url`、`--token`、`--client`
 - `xiaohongshu publish` 当前 bridge 上传链路要求 `--images` 传远程 URL，而不是本地文件路径
 

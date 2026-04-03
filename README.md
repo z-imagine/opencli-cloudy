@@ -98,7 +98,7 @@ Required extension settings:
 - `backendUrl`
 - `token`
 
-Recommended flow:
+Manual setup example:
 
 ```bash
 # 1) Start remote bridge server
@@ -108,16 +108,16 @@ OPENCLI_REMOTE_BRIDGE_TOKEN=your-token npm run remote-bridge:dev
 #    backendUrl = http://127.0.0.1:19826
 #    token = your-token
 
-# 3) List online clients
-opencli clients --remote-url http://127.0.0.1:19826 --token your-token
-
-# 4) Run a command against one clientId
-opencli --remote-url http://127.0.0.1:19826 --token your-token --client cli_xxx bilibili hot --limit 5
+# 3) Run a command with a caller-provided clientId
+opencli --remote-url http://127.0.0.1:19826 --token your-token --client <clientId> bilibili hot --limit 5
 ```
 
 Notes:
 
-- `clientId` is assigned by the remote bridge after the extension registers successfully.
+- `--client` is required for browser commands.
+- Never invent or guess a `clientId`.
+- If `clientId` is unknown, stop and ask the caller to provide it.
+- Do not auto-run `opencli clients` unless the user explicitly asks to list clients or debug Browser Bridge connectivity.
 - `opencli doctor` is only a connectivity diagnostic helper. It does not replace `--remote-url` / `--token` / `--client`.
 - For `xiaohongshu publish`, the current bridge upload path expects `--images` to be remote URLs, not local file paths.
 

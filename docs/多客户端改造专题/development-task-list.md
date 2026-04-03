@@ -100,7 +100,7 @@
 | 1.3 | 实现 `GET /health` | 提供健康检查接口 | 已完成 | |
 | 1.4 | 实现 `WS /agent` | 支持扩展接入 | 已完成 | |
 | 1.5 | 实现注册消息校验 | 校验 `register` 消息结构与 token | 已完成 | |
-| 1.6 | 实现 `clientId` 分配 | 为每个新连接分配唯一客户端 ID | 已完成 | |
+| 1.6 | 实现 `clientId` 注册 | 接收扩展上报的稳定客户端 ID 并完成注册 | 已完成 | |
 | 1.7 | 实现在线连接注册表 | 维护 `clientId -> ws` 映射 | 已完成 | |
 | 1.8 | 实现 `GET /api/clients` | 返回当前在线客户端列表 | 已完成 | |
 | 1.9 | 实现 `POST /api/command` | 接收 CLI 命令并路由 | 已完成 | |
@@ -213,7 +213,7 @@
 | 3.4 | background 读取配置 | 扩展启动时读取本地配置 | 已完成 | 已增加配置缓存与启动时 hydrate |
 | 3.5 | background 连接远程 WebSocket | 基于 `backendUrl` 建立连接 | 已完成 | 已改为根据配置生成 `/agent` 连接地址 |
 | 3.6 | 实现注册消息发送 | 发送 `register`，附带 token 和能力信息 | 已完成 | 已发送版本、UA、能力与阈值 |
-| 3.7 | 处理 `registered` 响应 | 保存服务端下发的 `clientId` | 已完成 | 已持久化 `clientId` 并在 popup 展示 |
+| 3.7 | 处理 `registered` 响应 | 确认服务端接受扩展上报的 `clientId` 并完成握手 | 已完成 | 已持久化 `clientId` 并在 popup 展示 |
 | 3.8 | 实现心跳机制 | 周期性发送 `heartbeat` | 已完成 | 已复用 alarm keepalive 发送心跳 |
 | 3.9 | 实现断线重连 | 指数退避重连 | 已完成 | 已保留原指数退避策略并切换到远程 bridge |
 | 3.10 | 保留现有命令处理逻辑 | `exec`、`navigate` 等现有动作继续生效 | 已完成 | 已通过扩展定向测试验证 |

@@ -102,8 +102,8 @@ export function ensureRemoteBridgeRouting(requireClient: boolean): {
     throw new ConfigError(
       `Missing required Browser Bridge routing parameters: ${formatMissingRemoteParams(missing)}.`,
       requireClient
-        ? 'Browser commands must include --remote-url, --token, and --client. If you do not know the clientId yet, run `opencli clients --remote-url <bridge-url> --token <token>` first.'
-        : 'The clients command requires --remote-url and --token so it can query the Browser Bridge.',
+        ? 'Parameter meaning: --remote-url is the Browser Bridge server address; --token is the shared authentication token used by both CLI and extension; --client is the target online browser clientId. For browser commands, the caller must provide all three. Never invent or guess --client. If it is missing, stop and ask the caller to provide it. Do not auto-run `opencli clients` unless the user explicitly requested client listing or debugging.'
+        : 'Parameter meaning: --remote-url is the Browser Bridge server address; --token is the shared authentication token used by both CLI and extension. The `clients` command is only for explicit client listing or debugging.',
     );
   }
 

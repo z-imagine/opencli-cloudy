@@ -50,7 +50,7 @@ Browser commands require:
    - `--client` or `OPENCLI_REMOTE_CLIENT`
 
 > **Note**: You must be logged into the target website in Chrome before running commands. Tabs opened during command execution are auto-closed afterwards.
-> **Bridge Note**: `clientId` is generated and persisted by the extension, then reused across reconnects. Use `opencli clients --remote-url ... --token ...` to discover available clients before executing browser commands against a specific browser client.
+> **Bridge Rule**: `--client` / `OPENCLI_REMOTE_CLIENT` is required for browser commands. Never invent or guess a `clientId`. The caller must explicitly provide `--remote-url`, `--token`, and `--client`. Do not call `opencli clients` unless the user explicitly asks to list clients or diagnose connectivity.
 
 Public API commands (`hackernews`, `v2ex`) need no browser.
 
@@ -69,7 +69,15 @@ Required CLI parameters:
 - `--token` or `OPENCLI_REMOTE_TOKEN`
 - `--client` or `OPENCLI_REMOTE_CLIENT`
 
-Recommended flow:
+Hard rules for AI agents:
+
+- Treat `--remote-url`, `--token`, and `--client` as required browser routing inputs.
+- Never fabricate, guess, or placeholder-fill `--client`.
+- Do not auto-discover clients as a default step.
+- Only use a `clientId` that was explicitly provided by the caller.
+- Only call `opencli clients` when the user explicitly requests client listing or debugging.
+
+Manual setup example:
 
 ```bash
 # 1) Start remote bridge
@@ -79,16 +87,15 @@ OPENCLI_REMOTE_BRIDGE_TOKEN=your-token npm run remote-bridge:dev
 #    backendUrl = http://127.0.0.1:19826
 #    token = your-token
 
-# 3) Discover online browser clients
-opencli clients --remote-url http://127.0.0.1:19826 --token your-token
-
-# 4) Execute against one clientId
+# 3) Execute against one clientId already provided by the caller
 opencli --remote-url http://127.0.0.1:19826 --token your-token --client cli_xxx bilibili hot --limit 5
 ```
 
 Important:
 
 - `opencli doctor` is only a connectivity diagnostic helper. It does not replace `--remote-url` / `--token` / `--client`.
+- `--client` is not a free-form user label. It must be an actual online browser `clientId`.
+- If `--client` is not known yet, stop and request it from the caller. Do not retry browser commands with guessed values like `cli_test` or `cli_xxx`.
 - For `xiaohongshu publish`, the current bridge upload path expects `--images` to be remote URLs rather than local file paths.
 
 ## Commands Reference
@@ -99,6 +106,8 @@ Important:
 >
 > Or set the equivalent environment variables first:
 > `OPENCLI_REMOTE_URL` / `OPENCLI_REMOTE_TOKEN` / `OPENCLI_REMOTE_CLIENT`
+>
+> Never invent `clientId`. If it is missing, stop and ask the caller to provide it. Do not auto-run `opencli clients` unless the user explicitly asks for that.
 >
 > Public API commands (`hackernews`, `v2ex`, etc.) do not need these parameters.
 

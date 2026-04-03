@@ -26,10 +26,29 @@ export function runCli(BUILTIN_CLIS: string, USER_CLIS: string): void {
     .name('opencli')
     .description('Make any website your CLI. Zero setup. AI-powered.')
     .version(PKG_VERSION)
-    .option('--remote-url <url>', 'Remote bridge base URL')
-    .option('--token <token>', 'Remote bridge token')
-    .option('--client <id>', 'Remote bridge client ID')
+    .option('--remote-url <url>', 'Browser Bridge server URL, for example http://127.0.0.1:19826')
+    .option('--token <token>', 'Browser Bridge shared token; must match the token configured in the extension popup')
+    .option('--client <id>', 'Target browser clientId supplied by the caller; do not guess or fabricate this value')
     .enablePositionalOptions();
+
+  program.addHelpText('after', `
+Browser Bridge routing:
+  Browser commands require these 3 parameters:
+    --remote-url   Browser Bridge server address
+    --token        Shared authentication token used by CLI and extension
+    --client       Target browser clientId provided by the caller
+
+  Usage rule:
+    The caller must provide all 3 values explicitly for browser commands.
+    Do not guess or fabricate --client.
+    The clients command is only for explicit client listing or debugging.
+
+  Manual setup example:
+    1. Start bridge: OPENCLI_REMOTE_BRIDGE_TOKEN=<token> npm run remote-bridge:dev
+    2. Configure extension popup: backendUrl + token
+    3. Run browser command with caller-provided clientId:
+       opencli --remote-url <bridge-url> --token <token> --client <clientId> <site> <command>
+`);
 
   program.hook('preAction', (_thisCommand, actionCommand) => {
     const opts = typeof actionCommand.optsWithGlobals === 'function'

@@ -19,7 +19,7 @@ CLI -> 远程 bridge 服务 -> 指定浏览器扩展客户端
 - 单用户
 - 多终端 / 多浏览器客户端
 - 固定共享 `token` 鉴权
-- 浏览器扩展连接成功后由服务端分配 `clientId`
+- 浏览器扩展本地生成并持久化稳定 `clientId`
 - 扩展端可展示当前 `clientId`
 - CLI 可以查看在线客户端并指定某个 `clientId`
 - 远程文件注入只支持 `memory` 模式
@@ -34,7 +34,7 @@ CLI -> 远程 bridge 服务 -> 指定浏览器扩展客户端
   - `backendUrl`
   - `token`
 - 扩展注册、心跳、断线重连
-- 服务端分配并返回 `clientId`
+- 扩展注册时上报本地持久化的 `clientId`
 - CLI 增加远程 transport
 - CLI 支持按 `clientId` 定向下发命令
 - CLI 支持查看在线客户端列表
@@ -72,7 +72,7 @@ CLI
 - `token`
   - CLI 和扩展共用的固定共享密钥
 - `clientId`
-  - bridge 为每个在线扩展实例分配的唯一客户端标识
+  - 调用方必须显式提供的目标浏览器客户端标识，由扩展本地持久化并在注册时上报
 - `commandId`
   - 每次命令调用的唯一请求 ID
 - `workspace`
@@ -441,7 +441,7 @@ interface BrowserTransport {
 
 - 校验固定 token
 - 接收扩展 WebSocket 注册
-- 分配 `clientId`
+- 接收并登记扩展上报的稳定 `clientId`
 - 维护在线客户端列表
 - 按 `clientId` 路由 HTTP 命令
 - 维护 `commandId -> promise` 的 pending 表
