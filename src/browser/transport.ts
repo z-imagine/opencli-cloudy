@@ -1,6 +1,7 @@
 import { sleep } from '../utils.js';
 import { DEFAULT_DAEMON_PORT } from '../constants.js';
 import type { RemoteFileInputDescriptor } from '../types.js';
+import { ConfigError } from '../errors.js';
 
 export interface BrowserTransport {
   send(action: string, payload?: Record<string, unknown>): Promise<unknown>;
@@ -68,22 +69,61 @@ function getDaemonUrl(): string {
   return `http://127.0.0.1:${port}`;
 }
 
+function formatMissingRemoteParams(params: string[]): string {
+  return params.map((param) => {
+    switch (param) {
+      case 'OPENCLI_REMOTE_URL':
+        return '--remote-url / OPENCLI_REMOTE_URL';
+      case 'OPENCLI_REMOTE_TOKEN':
+        return '--token / OPENCLI_REMOTE_TOKEN';
+      case 'OPENCLI_REMOTE_CLIENT':
+        return '--client / OPENCLI_REMOTE_CLIENT';
+      default:
+        return param;
+    }
+  }).join(', ');
+}
+
+export function ensureRemoteBridgeRouting(requireClient: boolean): {
+  baseUrl: string;
+  token: string;
+  clientId?: string;
+} {
+  const baseUrl = process.env.OPENCLI_REMOTE_URL?.trim() ?? '';
+  const token = process.env.OPENCLI_REMOTE_TOKEN?.trim() ?? '';
+  const clientId = process.env.OPENCLI_REMOTE_CLIENT?.trim() ?? '';
+  const missing: string[] = [];
+
+  if (!baseUrl) missing.push('OPENCLI_REMOTE_URL');
+  if (!token) missing.push('OPENCLI_REMOTE_TOKEN');
+  if (requireClient && !clientId) missing.push('OPENCLI_REMOTE_CLIENT');
+
+  if (missing.length > 0) {
+    throw new ConfigError(
+      `Missing required Browser Bridge routing parameters: ${formatMissingRemoteParams(missing)}.`,
+      requireClient
+        ? 'Browser commands must include --remote-url, --token, and --client. If you do not know the clientId yet, run `opencli clients --remote-url <bridge-url> --token <token>` first.'
+        : 'The clients command requires --remote-url and --token so it can query the Browser Bridge.',
+    );
+  }
+
+  return {
+    baseUrl: baseUrl.replace(/\/$/, ''),
+    token,
+    clientId: requireClient ? clientId : undefined,
+  };
+}
+
 function getRemoteBaseUrl(): string {
-  const value = process.env.OPENCLI_REMOTE_URL;
-  if (!value) throw new Error('OPENCLI_REMOTE_URL is required in remote mode');
-  return value.replace(/\/$/, '');
+  return ensureRemoteBridgeRouting(false).baseUrl;
 }
 
 function getRemoteToken(): string {
-  const value = process.env.OPENCLI_REMOTE_TOKEN;
-  if (!value) throw new Error('OPENCLI_REMOTE_TOKEN is required in remote mode');
-  return value;
+  return ensureRemoteBridgeRouting(false).token;
 }
 
 function getRemoteClientId(): string {
-  const value = process.env.OPENCLI_REMOTE_CLIENT;
-  if (!value) throw new Error('OPENCLI_REMOTE_CLIENT is required in remote mode');
-  return value;
+  return ensureRemoteBridgeRouting(true).clientId!;
 }
 
 export class LocalDaemonTransport implements BrowserTransport {
@@ -180,5 +220,7 @@ export async function listRemoteClients(): Promise<RemoteClientInfo[]> {
 }
 
 export function isRemoteBridgeConfigured(): boolean {
-  return !!process.env.OPENCLI_REMOTE_URL;
+  return !!process.env.OPENCLI_REMOTE_URL
+    && !!process.env.OPENCLI_REMOTE_TOKEN
+    && !!process.env.OPENCLI_REMOTE_CLIENT;
 }

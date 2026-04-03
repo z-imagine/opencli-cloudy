@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 import { createRemoteBridgeServer } from '../remote-bridge/server.js';
-import { listRemoteClients, RemoteBridgeTransport } from './transport.js';
+import { ensureRemoteBridgeRouting, listRemoteClients, RemoteBridgeTransport } from './transport.js';
 
 describe('browser transport', () => {
   let server: ReturnType<typeof createRemoteBridgeServer>;
@@ -97,5 +97,22 @@ describe('browser transport', () => {
 
     await expect(responsePromise).resolves.toEqual({ ok: 1 });
     ws.close();
+  });
+
+  it('reports missing clientId with a friendly Browser Bridge error', () => {
+    delete process.env.OPENCLI_REMOTE_CLIENT;
+    expect(() => ensureRemoteBridgeRouting(true)).toThrow(
+      'Missing required Browser Bridge routing parameters: --client / OPENCLI_REMOTE_CLIENT.',
+    );
+  });
+
+  it('allows opencli clients without clientId but still requires remote-url and token', () => {
+    delete process.env.OPENCLI_REMOTE_CLIENT;
+    expect(() => ensureRemoteBridgeRouting(false)).not.toThrow();
+
+    delete process.env.OPENCLI_REMOTE_TOKEN;
+    expect(() => ensureRemoteBridgeRouting(false)).toThrow(
+      'Missing required Browser Bridge routing parameters: --token / OPENCLI_REMOTE_TOKEN.',
+    );
   });
 });

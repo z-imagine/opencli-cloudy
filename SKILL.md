@@ -50,7 +50,7 @@ Browser commands require:
    - `--client` or `OPENCLI_REMOTE_CLIENT`
 
 > **Note**: You must be logged into the target website in Chrome before running commands. Tabs opened during command execution are auto-closed afterwards.
-> **Bridge Note**: `clientId` is assigned by the bridge after the extension registers successfully. Use `opencli clients --remote-url ... --token ...` to discover available clients before executing browser commands against a specific browser client.
+> **Bridge Note**: `clientId` is generated and persisted by the extension, then reused across reconnects. Use `opencli clients --remote-url ... --token ...` to discover available clients before executing browser commands against a specific browser client.
 
 Public API commands (`hackernews`, `v2ex`) need no browser.
 
