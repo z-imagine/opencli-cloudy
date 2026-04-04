@@ -1,0 +1,31 @@
+{
+  "name": "weixin-mp-list",
+  "version": "0.1.0",
+  "private": true,
+  "description": "独立的微信公众号后台列表抓取小工具",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "bin": {
+    "weixin-mp-list": "src/main.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "commander": "^14.0.3",
+    "jpeg-js": "^0.4.4",
+    "jsqr": "^1.4.0",
+    "pngjs": "^7.0.0",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/pngjs": "^6.0.5",
+    "tsx": "^4.19.3",
+    "typescript": "^6.0.2"
+  }
+}
