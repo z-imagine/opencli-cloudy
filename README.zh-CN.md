@@ -121,9 +121,11 @@ CLI 侧必填参数：
 ```bash
 # 1）启动远程 bridge
 OPENCLI_REMOTE_BRIDGE_TOKEN=your-token npm run remote-bridge:dev
+# 或显式绑定：
+# OPENCLI_REMOTE_BRIDGE_HOST=0.0.0.0 OPENCLI_REMOTE_BRIDGE_TOKEN=your-token npm run remote-bridge:dev
 
 # 2）在扩展 popup 中配置：
-#    backendUrl = http://127.0.0.1:19826
+#    backendUrl = http://<bridge-host>:19826
 #    token = your-token
 
 # 3）使用调用方已提供的 clientId 执行命令

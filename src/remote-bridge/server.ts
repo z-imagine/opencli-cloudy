@@ -14,6 +14,7 @@ import {
 export interface RemoteBridgeServerOptions {
   token: string;
   port?: number;
+  host?: string;
   logger?: Pick<Console, 'log' | 'error' | 'warn'>;
 }
 
@@ -52,6 +53,7 @@ function formatRawPayload(raw: RawData): string {
 export function createRemoteBridgeServer(options: RemoteBridgeServerOptions): RemoteBridgeServer {
   const logger = options.logger ?? console;
   const port = options.port ?? DEFAULT_REMOTE_BRIDGE_PORT;
+  const host = options.host?.trim() || '0.0.0.0';
   const registry = new RemoteBridgeRegistry();
 
   const server = createServer((req, res) => {
@@ -171,9 +173,9 @@ export function createRemoteBridgeServer(options: RemoteBridgeServerOptions): Re
     start(): Promise<void> {
       return new Promise((resolve, reject) => {
         server.once('error', reject);
-        server.listen(port, '127.0.0.1', () => {
+        server.listen(port, host, () => {
           server.off('error', reject);
-          logger.log(`[remote-bridge] listening on http://127.0.0.1:${port}`);
+          logger.log(`[remote-bridge] listening on http://${host}:${port}`);
           resolve();
         });
       });

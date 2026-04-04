@@ -11,6 +11,11 @@ function readPort(): number {
   return port;
 }
 
+function readHost(): string {
+  const raw = process.env.OPENCLI_REMOTE_BRIDGE_HOST?.trim();
+  return raw || '0.0.0.0';
+}
+
 const token = process.env.OPENCLI_REMOTE_BRIDGE_TOKEN;
 if (!token) {
   throw new Error('OPENCLI_REMOTE_BRIDGE_TOKEN is required');
@@ -18,6 +23,7 @@ if (!token) {
 
 const server = createRemoteBridgeServer({
   token,
+  host: readHost(),
   port: readPort(),
 });
 

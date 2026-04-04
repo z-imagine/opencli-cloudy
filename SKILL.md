@@ -82,9 +82,11 @@ Manual setup example:
 ```bash
 # 1) Start remote bridge
 OPENCLI_REMOTE_BRIDGE_TOKEN=your-token npm run remote-bridge:dev
+# or bind explicitly:
+# OPENCLI_REMOTE_BRIDGE_HOST=0.0.0.0 OPENCLI_REMOTE_BRIDGE_TOKEN=your-token npm run remote-bridge:dev
 
 # 2) Configure the extension popup
-#    backendUrl = http://127.0.0.1:19826
+#    backendUrl = http://<bridge-host>:19826
 #    token = your-token
 
 # 3) Execute against one clientId already provided by the caller
