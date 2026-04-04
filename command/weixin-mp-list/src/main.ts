@@ -308,7 +308,7 @@ function saveSessionFile(filePath: string, session: SessionFile): void {
 
 function loadSessionFile(filePath: string): SessionFile {
   if (!fs.existsSync(filePath)) {
-    throw new Error(`未找到会话文件：${filePath}。请先执行 "weixin-mp-list login"，或显式传入 --cookie。`);
+    throw new Error(`未找到会话文件：${filePath}。请先执行 "weixin_mpsearch login"，或显式传入 --cookie。`);
   }
   const raw = fs.readFileSync(filePath, 'utf8');
   const parsed = JSON.parse(raw) as SessionFile;
@@ -555,7 +555,7 @@ async function finalizeQrLogin(cookie: string, fingerprint: string): Promise<{ c
 async function main(): Promise<void> {
   const program = new Command();
   program
-    .name('weixin-mp-list')
+    .name('weixin_mpsearch')
     .description('MVP：查询微信公众号候选列表与文章列表');
 
   const applySessionOptions = (command: Command): Command =>
@@ -636,7 +636,7 @@ async function main(): Promise<void> {
 
   applySessionOptions(
     program
-      .command('search-biz')
+      .command('listaccount')
       .description('根据公众号名称搜索公众号候选列表')
       .requiredOption('--nickname <name>', 'public account nickname to search')
       .option('--begin <n>', '搜索结果偏移量', '0')
@@ -677,7 +677,7 @@ async function main(): Promise<void> {
 
   applySessionOptions(
     program
-      .command('list-articles')
+      .command('listarticle')
       .description('根据精确 fakeid 拉取公众号文章列表')
       .requiredOption('--fakeid <fakeid>', '公众号 fakeid')
       .option('--begin <n>', '起始偏移量', '0')

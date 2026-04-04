@@ -1,19 +1,26 @@
 {
-  "name": "weixin-mp-list",
+  "name": "weixin_mpsearch",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "description": "独立的微信公众号后台列表抓取小工具",
   "type": "module",
+  "main": "dist/main.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "engines": {
     "node": ">=20.0.0"
   },
   "bin": {
-    "weixin-mp-list": "src/main.ts"
+    "weixin_mpsearch": "dist/main.js"
   },
   "scripts": {
     "dev": "tsx src/main.ts",
     "start": "tsx src/main.ts",
-    "typecheck": "tsc --noEmit"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "commander": "^14.0.3",
