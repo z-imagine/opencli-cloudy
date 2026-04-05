@@ -21,6 +21,7 @@
 - `wxmp_article_index` 只记录文章本身的索引信息
 - 不在文章表中记录分页状态、翻页进度、抓取页码等运行态字段
 - `wxmp_article_content` 使用 `article_id` 存储对应文章索引主键值
+- `wxmp_article_index.account_id` 允许为空，兼容直接按文章 URL 抓正文的场景
 - `url` 用于唯一约束和去重，不作为主关联键
 - 原始响应保留在 `raw_json jsonb`
 - 第一版不使用数据库外键约束，只使用普通字段和普通索引

@@ -64,7 +64,7 @@ EXECUTE FUNCTION wxmp_set_updated_at();
 -- ============================================================
 CREATE TABLE IF NOT EXISTS wxmp_article_index (
   id                BIGSERIAL PRIMARY KEY,                             -- 文章索引主键
-  account_id        BIGINT NOT NULL,                                   -- 所属公众号主键值
+  account_id        BIGINT,                                            -- 所属公众号主键值，可为空
   url               TEXT NOT NULL UNIQUE,                              -- 文章 URL，业务唯一键
   title             TEXT NOT NULL,                                     -- 文章标题
   digest            TEXT,                                              -- 文章摘要
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS wxmp_article_index (
 
 COMMENT ON TABLE wxmp_article_index IS '微信公众号文章索引表';
 COMMENT ON COLUMN wxmp_article_index.id IS '文章索引主键';
-COMMENT ON COLUMN wxmp_article_index.account_id IS '所属公众号主键值';
+COMMENT ON COLUMN wxmp_article_index.account_id IS '所属公众号主键值，可为空';
 COMMENT ON COLUMN wxmp_article_index.url IS '文章 URL，业务唯一键';
 COMMENT ON COLUMN wxmp_article_index.title IS '文章标题';
 COMMENT ON COLUMN wxmp_article_index.digest IS '文章摘要';

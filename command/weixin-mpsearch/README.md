@@ -42,6 +42,17 @@ npx weixin_mpsearch setup
 - 连接数据库
 - 执行包内置 SQL：`sql/init.sql`
 
+可选环境变量：
+
+```bash
+export WEIXIN_MP_DB_SSL='true'
+```
+
+说明：
+
+- 配置了 `WEIXIN_MP_DB_URL` 后，`listaccount`、`listarticle`、`getarticle` 执行后会自动写入数据库
+- 如果没有配置 `WEIXIN_MP_DB_URL`，命令仍然可以正常执行，但只输出结果，不做存库
+
 ## 用法
 
 扫码登录并保存本地会话：

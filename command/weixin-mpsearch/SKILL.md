@@ -64,6 +64,17 @@ npx weixin_mpsearch setup
 - 连接数据库
 - 执行包内置 SQL：`sql/init.sql`
 
+可选环境变量：
+
+```bash
+export WEIXIN_MP_DB_SSL='true'
+```
+
+说明：
+
+- 配置了 `WEIXIN_MP_DB_URL` 后，`listaccount`、`listarticle`、`getarticle` 执行后会自动写入数据库
+- 如果没有配置 `WEIXIN_MP_DB_URL`，命令仍然可以正常执行，但只输出结果，不做存库
+
 ## 业务流程
 
 ### 流程 A：公众号名称 -> 候选账号 -> 目标 fakeid -> 文章列表
@@ -285,12 +296,14 @@ npx weixin_mpsearch getarticle --url '<文章URL>'
 
 - 结果直接打印到终端
 - stdout 输出完整 JSON
+- 如果已配置数据库连接，会在打印 JSON 的同时自动写库
 
 ### 带 `--output <path>`
 
 - 结果写入指定文件
 - 相对路径相对于当前执行目录
 - 终端只打印简短提示，不再打印完整 JSON
+- 如果已配置数据库连接，仍会自动写库
 
 ## 必须遵守的执行原则
 

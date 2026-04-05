@@ -89,6 +89,11 @@ interface ParsedArticleResult {
   imageUrls: string[];
 }
 
+interface DbConfig {
+  connectionString: string;
+  ssl?: { rejectUnauthorized: boolean };
+}
+
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36';
 const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_SQL_FILE = path.resolve(ROOT_DIR, 'sql/init.sql');
@@ -122,6 +127,200 @@ function ensureParentDir(filePath: string): void {
 function ensureRuntimeDirs(): void {
   ensureParentDir(DEFAULT_SESSION_FILE);
   ensureParentDir(DEFAULT_QR_FILE);
+}
+
+function getDbConfig(): DbConfig | null {
+  const connectionString = process.env.WEIXIN_MP_DB_URL?.trim() || process.env.DATABASE_URL?.trim() || '';
+  if (!connectionString) return null;
+  const sslMode = process.env.WEIXIN_MP_DB_SSL?.trim().toLowerCase();
+  return {
+    connectionString,
+    ssl: sslMode === 'true' ? { rejectUnauthorized: false } : undefined,
+  };
+}
+
+function asNullableNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function asNullableText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function asNullableDate(value: unknown): Date | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+async function withOptionalDbTransaction(
+  label: string,
+  work: (client: Client) => Promise<void>,
+): Promise<boolean> {
+  const dbConfig = getDbConfig();
+  if (!dbConfig) return false;
+
+  const client = new Client(dbConfig);
+  try {
+    await client.connect();
+    await client.query('BEGIN');
+    await work(client);
+    await client.query('COMMIT');
+    return true;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => undefined);
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${label} 自动存库失败：${message}`);
+  } finally {
+    await client.end().catch(() => undefined);
+  }
+}
+
+async function saveAccountsToDb(
+  client: Client,
+  query: string,
+  items: SearchBizItem[],
+): Promise<void> {
+  for (const item of items) {
+    if (!item.fakeid || !item.nickname) continue;
+    await client.query(
+      `INSERT INTO wxmp_accounts (
+         fakeid, nickname, alias, signature, verify_status, service_type, round_head_img, raw_json
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+       ON CONFLICT (fakeid) DO UPDATE SET
+         nickname = EXCLUDED.nickname,
+         alias = EXCLUDED.alias,
+         signature = EXCLUDED.signature,
+         verify_status = EXCLUDED.verify_status,
+         service_type = EXCLUDED.service_type,
+         round_head_img = EXCLUDED.round_head_img,
+         raw_json = EXCLUDED.raw_json`,
+      [
+        item.fakeid,
+        item.nickname,
+        asNullableText(item.alias),
+        asNullableText(item.signature),
+        asNullableNumber(item.verify_status),
+        asNullableNumber(item.service_type),
+        asNullableText(item.round_head_img),
+        JSON.stringify({ query, item }),
+      ],
+    );
+  }
+}
+
+async function findAccountIdByFakeid(client: Client, fakeid: string): Promise<number | null> {
+  const result = await client.query<{ id: string }>(
+    'SELECT id FROM wxmp_accounts WHERE fakeid = $1 LIMIT 1',
+    [fakeid],
+  );
+  if (result.rowCount !== 1) return null;
+  return Number.parseInt(result.rows[0].id, 10);
+}
+
+async function upsertArticleIndexRows(
+  client: Client,
+  fakeid: string | null,
+  items: AppMsgItem[],
+): Promise<Map<string, number>> {
+  const articleIds = new Map<string, number>();
+  const accountId = fakeid ? await findAccountIdByFakeid(client, fakeid) : null;
+
+  for (const item of items) {
+    const url = asNullableText(item.link);
+    const title = item.title ?? '';
+    if (!url || !title) continue;
+
+    const result = await client.query<{ id: string }>(
+      `INSERT INTO wxmp_article_index (
+         account_id, url, title, digest, cover, aid, appmsgid, itemidx, update_time, update_time_iso, raw_json
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+       ON CONFLICT (url) DO UPDATE SET
+         account_id = COALESCE(EXCLUDED.account_id, wxmp_article_index.account_id),
+         title = EXCLUDED.title,
+         digest = EXCLUDED.digest,
+         cover = EXCLUDED.cover,
+         aid = EXCLUDED.aid,
+         appmsgid = EXCLUDED.appmsgid,
+         itemidx = EXCLUDED.itemidx,
+         update_time = EXCLUDED.update_time,
+         update_time_iso = EXCLUDED.update_time_iso,
+         raw_json = EXCLUDED.raw_json
+       RETURNING id`,
+      [
+        accountId,
+        url,
+        title,
+        asNullableText(item.digest),
+        asNullableText(item.cover),
+        asNullableText(item.aid),
+        asNullableNumber(item.appmsgid),
+        asNullableNumber(item.itemidx),
+        asNullableNumber(item.update_time),
+        typeof item.update_time === 'number' ? new Date(item.update_time * 1000) : null,
+        JSON.stringify(item),
+      ],
+    );
+    articleIds.set(url, Number.parseInt(result.rows[0].id, 10));
+  }
+
+  return articleIds;
+}
+
+async function ensureArticleIndexForContent(
+  client: Client,
+  article: ParsedArticleResult,
+): Promise<number> {
+  const result = await client.query<{ id: string }>(
+    `INSERT INTO wxmp_article_index (
+       account_id, url, title, digest, cover, aid, appmsgid, itemidx, update_time, update_time_iso, raw_json
+     ) VALUES (NULL, $1, $2, $3, NULL, NULL, NULL, NULL, NULL, NULL, $4::jsonb)
+     ON CONFLICT (url) DO UPDATE SET
+       title = EXCLUDED.title,
+       digest = EXCLUDED.digest
+     RETURNING id`,
+    [
+      article.url,
+      article.title,
+      asNullableText(article.digest),
+      JSON.stringify({ source: 'getarticle', url: article.url }),
+    ],
+  );
+  return Number.parseInt(result.rows[0].id, 10);
+}
+
+async function upsertArticleContent(
+  client: Client,
+  articleId: number,
+  article: ParsedArticleResult,
+): Promise<void> {
+  await client.query(
+    `INSERT INTO wxmp_article_content (
+       article_id, title, account_name, author, publish_time, digest, content_text, content_html, image_urls, raw_json
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10::jsonb)
+     ON CONFLICT (article_id) DO UPDATE SET
+       title = EXCLUDED.title,
+       account_name = EXCLUDED.account_name,
+       author = EXCLUDED.author,
+       publish_time = EXCLUDED.publish_time,
+       digest = EXCLUDED.digest,
+       content_text = EXCLUDED.content_text,
+       content_html = EXCLUDED.content_html,
+       image_urls = EXCLUDED.image_urls,
+       raw_json = EXCLUDED.raw_json`,
+    [
+      articleId,
+      article.title,
+      asNullableText(article.accountName),
+      asNullableText(article.author),
+      asNullableText(article.publishTime),
+      asNullableText(article.digest),
+      asNullableText(article.contentText),
+      asNullableText(article.contentHtml),
+      JSON.stringify(article.imageUrls),
+      JSON.stringify(article),
+    ],
+  );
 }
 
 function randomSessionId(): string {
@@ -742,20 +941,15 @@ async function main(): Promise<void> {
     .action(async () => {
       ensureRuntimeDirs();
 
-      const dbUrl = process.env.WEIXIN_MP_DB_URL?.trim() || process.env.DATABASE_URL?.trim();
-      if (!dbUrl) {
+      const dbConfig = getDbConfig();
+      if (!dbConfig) {
         throw new Error('缺少数据库连接配置。请先设置 WEIXIN_MP_DB_URL。');
       }
       if (!fs.existsSync(DEFAULT_SQL_FILE)) {
         throw new Error(`未找到初始化 SQL 文件：${DEFAULT_SQL_FILE}`);
       }
 
-      const sslMode = process.env.WEIXIN_MP_DB_SSL?.trim().toLowerCase();
-      const client = new Client({
-        connectionString: dbUrl,
-        ssl: sslMode === 'true' ? { rejectUnauthorized: false } : undefined,
-      });
-
+      const client = new Client(dbConfig);
       const sql = fs.readFileSync(DEFAULT_SQL_FILE, 'utf8');
       try {
         await client.connect();
@@ -841,6 +1035,10 @@ async function main(): Promise<void> {
     const payload = await searchOfficial(cookie, token, nickname, begin, pageSize);
     const items = Array.isArray(payload.list) ? payload.list : [];
 
+    await withOptionalDbTransaction('listaccount', async (client) => {
+      await saveAccountsToDb(client, nickname, items);
+    });
+
     const result = {
       ok: true,
       token,
@@ -890,6 +1088,10 @@ async function main(): Promise<void> {
     const items = Array.isArray(payload.app_msg_list) ? payload.app_msg_list : [];
     allItems.push(...items);
 
+    await withOptionalDbTransaction('listarticle', async (client) => {
+      await upsertArticleIndexRows(client, fakeid, items);
+    });
+
     const result = {
       ok: true,
       token,
@@ -927,6 +1129,11 @@ async function main(): Promise<void> {
       const cookie = resolveOptionalCookie(opts);
       const { html, finalUrl } = await fetchArticleHtml(rawUrl, cookie);
       const result = parseWechatArticle(html, finalUrl);
+
+      await withOptionalDbTransaction('getarticle', async (client) => {
+        const articleId = await ensureArticleIndexForContent(client, result);
+        await upsertArticleContent(client, articleId, result);
+      });
 
       const output = JSON.stringify(result, null, 2);
       if (opts.output) {
