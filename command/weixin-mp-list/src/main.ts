@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import * as cheerio from 'cheerio';
+import type { AnyNode } from 'domhandler';
 import { Command } from 'commander';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -70,6 +72,19 @@ interface SessionValidationResult {
   ok: boolean;
   token?: string;
   reason?: string;
+}
+
+interface ParsedArticleResult {
+  ok: true;
+  title: string;
+  accountName: string;
+  author: string;
+  publishTime: string;
+  url: string;
+  digest: string;
+  contentHtml: string;
+  contentText: string;
+  imageUrls: string[];
 }
 
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36';
@@ -225,6 +240,160 @@ async function getJson<T>(url: string, params: Record<string, string>, cookie: s
   }
 
   return response.json() as Promise<T>;
+}
+
+function normalizeWhitespace(text: string): string {
+  return text.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function stripHtmlTags(html: string): string {
+  return normalizeWhitespace(html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, ' '));
+}
+
+function formatUnixTimestamp(seconds: number): string {
+  const formatter = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(new Date(seconds * 1000));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day} ${values.hour}:${values.minute}:${values.second}`;
+}
+
+function extractWechatPublishTime(renderedText: string, html: string): string {
+  const normalizedRenderedText = normalizeWhitespace(renderedText);
+  if (normalizedRenderedText) return normalizedRenderedText;
+
+  const textDatePatterns = [
+    /create_time:\s*JsDecode\('([^']+)'\)/,
+    /create_time:\s*"([^"]+)"/,
+    /create_time:\s*'([^']+)'(?!\s*\*\s*1)/,
+  ];
+  for (const pattern of textDatePatterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) return normalizeWhitespace(match[1]);
+  }
+
+  const timestampPatterns = [
+    /create_timestamp:\s*['"]?(\d{10})['"]?\s*\*\s*1/,
+    /create_time:\s*['"]?(\d{10})['"]?\s*\*\s*1/,
+    /ct\s*=\s*['"]?(\d{10})/,
+  ];
+  for (const pattern of timestampPatterns) {
+    const match = html.match(pattern);
+    if (match?.[1]) {
+      const value = Number.parseInt(match[1], 10);
+      if (Number.isFinite(value) && value > 0) return formatUnixTimestamp(value);
+    }
+  }
+
+  return '';
+}
+
+function firstText($: cheerio.CheerioAPI, selectors: string[]): string {
+  for (const selector of selectors) {
+    const text = normalizeWhitespace($(selector).first().text());
+    if (text && text !== 'Name cleared') return text;
+  }
+  return '';
+}
+
+function resolveOptionalCookie(opts: { cookie?: string }): string | undefined {
+  if (typeof opts.cookie === 'string' && opts.cookie.trim()) {
+    return opts.cookie.trim();
+  }
+  return undefined;
+}
+
+async function fetchArticleHtml(url: string, cookie?: string): Promise<{ html: string; finalUrl: string }> {
+  const headers = new Headers({
+    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+    Referer: 'https://mp.weixin.qq.com/',
+    'Accept-Language': 'zh-CN,zh;q=0.9',
+  });
+  if (cookie) headers.set('Cookie', cookie);
+  const response = await fetch(url, {
+    headers,
+    redirect: 'follow',
+  });
+  if (!response.ok) {
+    throw new Error(`抓取文章页面失败：HTTP ${response.status}`);
+  }
+  const html = await response.text();
+  return {
+    html,
+    finalUrl: response.url,
+  };
+}
+
+function parseWechatArticle(html: string, finalUrl: string): ParsedArticleResult {
+  if (/wappoc_appmsgcaptcha/.test(finalUrl) || /环境异常|验证后可继续访问|完成验证后可继续访问/.test(html)) {
+    throw new Error('当前文章页面触发了微信访问验证，暂时无法直接解析。');
+  }
+
+  const $ = cheerio.load(html);
+  const content = $('#js_content').first();
+  if (!content.length) {
+    throw new Error('未找到文章正文节点 #js_content。');
+  }
+
+  content.find('img').each((_: number, element: AnyNode) => {
+    const el = $(element);
+    const dataSrc = el.attr('data-src');
+    if (dataSrc) el.attr('src', dataSrc);
+  });
+
+  content.find('script, style, .qr_code_pc, .reward_area').remove();
+
+  const imageUrls: string[] = [];
+  const seen = new Set<string>();
+  content.find('img').each((_: number, element: AnyNode) => {
+    const src = $(element).attr('src');
+    if (src && !seen.has(src)) {
+      seen.add(src);
+      imageUrls.push(src);
+    }
+  });
+
+  const title = firstText($, ['#activity-name', '#js_msg_title', '#js_text_title', '.rich_media_title']);
+  const accountName = firstText($, [
+    '#js_name',
+    '.wx_follow_nickname',
+    '#profileBt .profile_nickname',
+    '.rich_media_meta.rich_media_meta_nickname',
+    '.rich_media_meta_nickname',
+  ]);
+  const publishTime = extractWechatPublishTime(firstText($, ['#publish_time']), html);
+  const author = firstText($, [
+    '#meta_content',
+    '.rich_media_meta.rich_media_meta_text',
+    '.wx_follow_meta_nickname',
+  ]);
+  const contentHtml = content.html()?.trim() ?? '';
+  const contentText = normalizeWhitespace(content.text());
+  const digest = contentText.slice(0, 140);
+
+  return {
+    ok: true,
+    title,
+    accountName,
+    author,
+    publishTime,
+    url: finalUrl,
+    digest,
+    contentHtml,
+    contentText,
+    imageUrls,
+  };
 }
 
 async function searchOfficial(
@@ -556,7 +725,7 @@ async function main(): Promise<void> {
   const program = new Command();
   program
     .name('weixin_mpsearch')
-    .description('MVP：查询微信公众号候选列表与文章列表');
+    .description('MVP：查询微信公众号候选列表、文章列表与文章正文');
 
   const applySessionOptions = (command: Command): Command =>
     command
@@ -732,6 +901,32 @@ async function main(): Promise<void> {
     }
     console.log(output);
   });
+
+  program
+    .command('getarticle')
+    .description('根据文章 URL 解析公众号文章正文内容')
+    .requiredOption('--url <url>', '公众号文章 URL')
+    .option('--cookie <cookie>', '可选：访问文章页时携带的 cookie')
+    .option('--output <path>', '将 JSON 结果写入文件')
+    .action(async (opts) => {
+      const rawUrl = String(opts.url).trim();
+      if (!rawUrl) throw new Error('必须提供 --url。');
+      if (!/^https?:\/\/mp\.weixin\.qq\.com\//.test(rawUrl)) {
+        throw new Error('只支持 mp.weixin.qq.com 的文章 URL。');
+      }
+
+      const cookie = resolveOptionalCookie(opts);
+      const { html, finalUrl } = await fetchArticleHtml(rawUrl, cookie);
+      const result = parseWechatArticle(html, finalUrl);
+
+      const output = JSON.stringify(result, null, 2);
+      if (opts.output) {
+        fs.writeFileSync(String(opts.output), output + '\n', 'utf8');
+        console.log(`已将文章解析结果写入：${opts.output}`);
+        return;
+      }
+      console.log(output);
+    });
 
   program.showHelpAfterError();
   await program.parseAsync(process.argv);

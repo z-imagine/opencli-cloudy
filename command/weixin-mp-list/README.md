@@ -35,3 +35,15 @@ weixin_mpsearch listaccount --nickname '腾讯新闻' --count 5
 ```bash
 weixin_mpsearch listarticle --fakeid 'MjM5NzM2NjUzNg==' --count 5 --pages 1
 ```
+
+根据文章 URL 解析正文内容：
+
+```bash
+weixin_mpsearch getarticle --url 'https://mp.weixin.qq.com/s?...'
+```
+
+如果文章访问时触发校验，也可以显式带 cookie：
+
+```bash
+weixin_mpsearch getarticle --url 'https://mp.weixin.qq.com/s?...' --cookie '<cookie>'
+```
