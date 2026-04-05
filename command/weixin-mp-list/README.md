@@ -5,15 +5,21 @@
 ## 安装
 
 ```bash
-npm install -g weixin_mpsearch
-```
-
-本地开发：
-
-```bash
 cd command/weixin-mp-list
 npm install
 npm run build
+```
+
+推荐调用方式：
+
+```bash
+npx weixin_mpsearch --help
+```
+
+也可以使用：
+
+```bash
+npm run start -- --help
 ```
 
 ## 用法
@@ -21,29 +27,29 @@ npm run build
 扫码登录并保存本地会话：
 
 ```bash
-weixin_mpsearch login
+npx weixin_mpsearch login
 ```
 
 根据公众号名称搜索候选列表：
 
 ```bash
-weixin_mpsearch listaccount --nickname '腾讯新闻' --page 1 --pagesize 5
+npx weixin_mpsearch listaccount --nickname '腾讯新闻' --page 1 --pagesize 5
 ```
 
 根据精确 fakeid 拉取文章列表：
 
 ```bash
-weixin_mpsearch listarticle --fakeid 'MjM5NzM2NjUzNg==' --page 1 --pagesize 5
+npx weixin_mpsearch listarticle --fakeid 'MjM5NzM2NjUzNg==' --page 1 --pagesize 5
 ```
 
 根据文章 URL 解析正文内容：
 
 ```bash
-weixin_mpsearch getarticle --url 'https://mp.weixin.qq.com/s?...'
+npx weixin_mpsearch getarticle --url 'https://mp.weixin.qq.com/s?...'
 ```
 
 如果文章访问时触发校验，也可以显式带 cookie：
 
 ```bash
-weixin_mpsearch getarticle --url 'https://mp.weixin.qq.com/s?...' --cookie '<cookie>'
+npx weixin_mpsearch getarticle --url 'https://mp.weixin.qq.com/s?...' --cookie '<cookie>'
 ```
