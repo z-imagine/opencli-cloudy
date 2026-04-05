@@ -91,7 +91,6 @@ interface ParsedArticleResult {
 
 interface DbConfig {
   connectionString: string;
-  ssl?: { rejectUnauthorized: boolean };
 }
 
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36';
@@ -132,10 +131,8 @@ function ensureRuntimeDirs(): void {
 function getDbConfig(): DbConfig | null {
   const connectionString = process.env.WEIXIN_MP_DB_URL?.trim() || process.env.DATABASE_URL?.trim() || '';
   if (!connectionString) return null;
-  const sslMode = process.env.WEIXIN_MP_DB_SSL?.trim().toLowerCase();
   return {
     connectionString,
-    ssl: sslMode === 'true' ? { rejectUnauthorized: false } : undefined,
   };
 }
 
