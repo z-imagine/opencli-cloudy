@@ -46,11 +46,23 @@ npm run start -- --help
 
 第一次使用前，先做 setup。
 
-先配置环境变量：
+先确保宿主运行环境已经提供环境变量 `WEIXIN_MPSEARCH_DB_URL`。
 
-```bash
-export WEIXIN_MP_DB_URL='postgres://user:password@host:5432/dbname'
+这个变量不是 skill 自己生成的，而是由宿主运行环境提供。
+
+如果是在 openclaw 这类 agent 宿主系统里运行，应该由 openclaw 的统一环境配置层注入这个变量，再由 skill 执行时继承。
+
+连接串示例：
+
+```text
+postgres://wxmp_user:wxmp_password@127.0.0.1:5432/wxmp_prod
 ```
+
+如果当前环境缺少这个变量，应该明确提示调用方去宿主系统中配置：
+
+- 变量名：`WEIXIN_MPSEARCH_DB_URL`
+- 变量值：数据库连接字符串
+- 示例值：`postgres://wxmp_user:wxmp_password@127.0.0.1:5432/wxmp_prod`
 
 然后执行：
 
@@ -66,8 +78,10 @@ npx weixin_mpsearch setup
 
 说明：
 
-- 配置了 `WEIXIN_MP_DB_URL` 后，`listaccount`、`listarticle`、`getarticle` 执行后会自动写入数据库
-- 如果没有配置 `WEIXIN_MP_DB_URL`，命令仍然可以正常执行，但只输出结果，不做存库
+- 配置了 `WEIXIN_MPSEARCH_DB_URL` 后，`listaccount`、`listarticle`、`getarticle` 执行后会自动写入数据库
+- 如果没有配置 `WEIXIN_MPSEARCH_DB_URL`，命令仍然可以正常执行，但只输出结果，不做存库
+- `setup` 本身依赖 `WEIXIN_MPSEARCH_DB_URL`，没有这个变量就无法执行数据库初始化
+- 如果是在 openclaw 等 agent 宿主环境中运行，应提示用户去宿主环境统一配置该变量，而不是让 skill 自己生成配置
 
 ## 业务流程
 

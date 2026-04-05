@@ -129,7 +129,7 @@ function ensureRuntimeDirs(): void {
 }
 
 function getDbConfig(): DbConfig | null {
-  const connectionString = process.env.WEIXIN_MP_DB_URL?.trim() || process.env.DATABASE_URL?.trim() || '';
+  const connectionString = process.env.WEIXIN_MPSEARCH_DB_URL?.trim() || '';
   if (!connectionString) return null;
   return {
     connectionString,
@@ -940,7 +940,7 @@ async function main(): Promise<void> {
 
       const dbConfig = getDbConfig();
       if (!dbConfig) {
-        throw new Error('缺少数据库连接配置。请先设置 WEIXIN_MP_DB_URL。');
+        throw new Error('缺少数据库连接配置。请先设置 WEIXIN_MPSEARCH_DB_URL。');
       }
       if (!fs.existsSync(DEFAULT_SQL_FILE)) {
         throw new Error(`未找到初始化 SQL 文件：${DEFAULT_SQL_FILE}`);

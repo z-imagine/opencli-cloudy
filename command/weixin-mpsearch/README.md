@@ -24,11 +24,21 @@ npm run start -- --help
 
 ## 初始化
 
-先配置环境变量：
+先确保运行环境已经提供环境变量 `WEIXIN_MPSEARCH_DB_URL`。
 
-```bash
-export WEIXIN_MP_DB_URL='postgres://user:password@host:5432/dbname'
+如果是在 agent / 宿主系统里运行，例如 openclaw，这个变量应由宿主系统统一注入，命令执行时自动继承。
+
+连接串示例：
+
+```text
+postgres://wxmp_user:wxmp_password@127.0.0.1:5432/wxmp_prod
 ```
+
+如果当前环境缺少这个变量，应提示调用方去宿主系统中配置：
+
+- 变量名：`WEIXIN_MPSEARCH_DB_URL`
+- 变量值：数据库连接字符串
+- 示例值：`postgres://wxmp_user:wxmp_password@127.0.0.1:5432/wxmp_prod`
 
 然后执行：
 
@@ -44,8 +54,9 @@ npx weixin_mpsearch setup
 
 说明：
 
-- 配置了 `WEIXIN_MP_DB_URL` 后，`listaccount`、`listarticle`、`getarticle` 执行后会自动写入数据库
-- 如果没有配置 `WEIXIN_MP_DB_URL`，命令仍然可以正常执行，但只输出结果，不做存库
+- 配置了 `WEIXIN_MPSEARCH_DB_URL` 后，`listaccount`、`listarticle`、`getarticle` 执行后会自动写入数据库
+- 如果没有配置 `WEIXIN_MPSEARCH_DB_URL`，命令仍然可以正常执行，但只输出结果，不做存库
+- `setup` 本身依赖 `WEIXIN_MPSEARCH_DB_URL`，没有这个变量就无法执行数据库初始化
 
 ## 用法
 
