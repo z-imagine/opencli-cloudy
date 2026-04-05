@@ -727,42 +727,17 @@ async function main(): Promise<void> {
     .name('weixin_mpsearch')
     .description('MVP：查询微信公众号候选列表、文章列表与文章正文');
 
-  const applySessionOptions = (command: Command): Command =>
-    command
-      .option('--session-file <path>', '本地会话 JSON 文件路径', DEFAULT_SESSION_FILE)
-      .option('--cookie <cookie>', '覆盖默认的 mp.weixin.qq.com 登录 cookie')
-      .option('--token <token>', '覆盖默认的 mp.weixin.qq.com 后台 token');
-
   program
     .command('login')
     .description('扫码登录 mp.weixin.qq.com，并将 cookie/token 保存到本地 JSON 文件')
-    .option('--session-file <path>', '本地会话 JSON 文件路径', DEFAULT_SESSION_FILE)
-    .option('--qr-file <path>', '本地二维码图片路径', DEFAULT_QR_FILE)
-    .option('--cookie <cookie>', '在开始扫码前先校验并保存已有 cookie')
-    .option('--token <token>', '与已有 cookie 配套的 token')
-    .action(async (opts) => {
-      const sessionFile = path.resolve(String(opts.sessionFile || DEFAULT_SESSION_FILE));
-      const qrFile = path.resolve(String(opts.qrFile || DEFAULT_QR_FILE));
+    .action(async () => {
+      const sessionFile = DEFAULT_SESSION_FILE;
+      const qrFile = DEFAULT_QR_FILE;
       const sessionId = randomSessionId();
       const fingerprint = randomFingerprint();
       const now = new Date().toISOString();
 
-      if (typeof opts.cookie === 'string' && opts.cookie.trim()) {
-        const validation = await validateSession(opts.cookie.trim(), opts.token);
-        if (validation.ok) {
-          saveSessionFile(sessionFile, {
-            cookie: opts.cookie.trim(),
-            token: validation.token,
-            createdAt: now,
-            updatedAt: now,
-            source: 'login',
-          });
-          console.log(`已经登录，当前 cookie 有效。会话已保存到：${sessionFile}`);
-          console.log(`Token：${validation.token}`);
-          return;
-        }
-        console.log(`已有 cookie 无效（${validation.reason ?? '未知错误'}），开始扫码登录。`);
-      } else if (fs.existsSync(sessionFile)) {
+      if (fs.existsSync(sessionFile)) {
         const existingSession = loadSessionFile(sessionFile);
         const validation = await validateSession(existingSession.cookie, existingSession.token);
         if (validation.ok) {
@@ -803,35 +778,37 @@ async function main(): Promise<void> {
       console.log(`Redirect URL：${finalized.redirectUrl}`);
     });
 
-  applySessionOptions(
-    program
-      .command('listaccount')
-      .description('根据公众号名称搜索公众号候选列表')
-      .requiredOption('--nickname <name>', 'public account nickname to search')
-      .option('--begin <n>', '搜索结果偏移量', '0')
-      .option('--count <n>', '拉取候选公众号数量', '5')
-      .option('--output <path>', '将 JSON 结果写入文件'),
-  ).action(async (opts) => {
+  program
+    .command('listaccount')
+    .description('根据公众号名称搜索公众号候选列表')
+    .requiredOption('--nickname <name>', '公众号名称')
+    .option('--page <n>', '第几页，从 1 开始', '1')
+    .option('--pagesize <n>', '每页拉取的候选公众号数量', '5')
+    .option('--output <path>', '将 JSON 结果写入文件')
+    .action(async (opts) => {
     const { cookie, token: sessionToken } = resolveSession(opts);
     const nickname = String(opts.nickname).trim();
-    const begin = Number.parseInt(String(opts.begin), 10);
-    const count = Number.parseInt(String(opts.count), 10);
+    const page = Number.parseInt(String(opts.page), 10);
+    const pageSize = Number.parseInt(String(opts.pagesize), 10);
 
     if (!nickname) throw new Error('必须提供 --nickname。');
-    if (!Number.isFinite(begin) || begin < 0) throw new Error('--begin 必须是大于等于 0 的整数。');
-    if (!Number.isFinite(count) || count <= 0) throw new Error('--count 必须是正整数。');
+    if (!Number.isFinite(page) || page <= 0) throw new Error('--page 必须是大于等于 1 的整数。');
+    if (!Number.isFinite(pageSize) || pageSize <= 0) throw new Error('--pagesize 必须是正整数。');
+    const begin = (page - 1) * pageSize;
 
     const token = sessionToken && sessionToken.trim() ? sessionToken.trim() : await inferToken(cookie);
-    const payload = await searchOfficial(cookie, token, nickname, begin, count);
+    const payload = await searchOfficial(cookie, token, nickname, begin, pageSize);
     const items = Array.isArray(payload.list) ? payload.list : [];
 
     const result = {
       ok: true,
       token,
       query: nickname,
+      page,
       begin,
+      pageSize,
       total: payload.total ?? null,
-      count: items.length,
+      itemCount: items.length,
       items,
     };
 
@@ -844,52 +821,43 @@ async function main(): Promise<void> {
     console.log(output);
   });
 
-  applySessionOptions(
-    program
-      .command('listarticle')
-      .description('根据精确 fakeid 拉取公众号文章列表')
-      .requiredOption('--fakeid <fakeid>', '公众号 fakeid')
-      .option('--begin <n>', '起始偏移量', '0')
-      .option('--count <n>', '每页拉取数量，通常 1-5', '5')
-      .option('--pages <n>', '拉取页数', '1')
-      .option('--delay-ms <n>', '分页之间的延迟毫秒数', '800')
-      .option('--output <path>', '将 JSON 结果写入文件'),
-  ).action(async (opts) => {
+  program
+    .command('listarticle')
+    .description('根据精确 fakeid 拉取公众号文章列表')
+    .requiredOption('--fakeid <fakeid>', '公众号 fakeid')
+    .option('--page <n>', '第几页，从 1 开始', '1')
+    .option('--pagesize <n>', '每页拉取的文章数量，通常 1-5', '5')
+    .option('--output <path>', '将 JSON 结果写入文件')
+    .action(async (opts) => {
     const { cookie, token: sessionToken } = resolveSession(opts);
     const fakeid = String(opts.fakeid).trim();
-    const begin = Number.parseInt(String(opts.begin), 10);
-    const count = Number.parseInt(String(opts.count), 10);
-    const pages = Number.parseInt(String(opts.pages), 10);
-    const delayMs = Number.parseInt(String(opts['delayMs']), 10);
+    const page = Number.parseInt(String(opts.page), 10);
+    const pageSize = Number.parseInt(String(opts.pagesize), 10);
+    const delayMs = 800;
 
     if (!fakeid) throw new Error('必须提供 --fakeid。');
-    if (!Number.isFinite(begin) || begin < 0) throw new Error('--begin 必须是大于等于 0 的整数。');
-    if (!Number.isFinite(count) || count <= 0) throw new Error('--count 必须是正整数。');
-    if (!Number.isFinite(pages) || pages <= 0) throw new Error('--pages 必须是正整数。');
-    if (!Number.isFinite(delayMs) || delayMs < 0) throw new Error('--delay-ms 必须是大于等于 0 的整数。');
+    if (!Number.isFinite(page) || page <= 0) throw new Error('--page 必须是大于等于 1 的整数。');
+    if (!Number.isFinite(pageSize) || pageSize <= 0) throw new Error('--pagesize 必须是正整数。');
+    const begin = (page - 1) * pageSize;
 
     const token = sessionToken && sessionToken.trim() ? sessionToken.trim() : await inferToken(cookie);
     const allItems: AppMsgItem[] = [];
     let totalCount: number | null = null;
 
-    for (let pageIndex = 0; pageIndex < pages; pageIndex += 1) {
-      const offset = begin + pageIndex * count;
-      const payload = await listArticlesByFakeid(cookie, token, fakeid, offset, count);
-      if (typeof payload.app_msg_cnt === 'number') totalCount = payload.app_msg_cnt;
-      const items = Array.isArray(payload.app_msg_list) ? payload.app_msg_list : [];
-      allItems.push(...items);
-      if (items.length < count) break;
-      if (pageIndex < pages - 1 && delayMs > 0) {
-        await sleep(delayMs);
-      }
-    }
+    const payload = await listArticlesByFakeid(cookie, token, fakeid, begin, pageSize);
+    if (typeof payload.app_msg_cnt === 'number') totalCount = payload.app_msg_cnt;
+    const items = Array.isArray(payload.app_msg_list) ? payload.app_msg_list : [];
+    allItems.push(...items);
 
     const result = {
       ok: true,
       token,
       fakeid,
+      page,
+      begin,
+      pageSize,
       totalCount,
-      count: allItems.length,
+      itemCount: allItems.length,
       items: normalizeItems(allItems),
     };
 

@@ -27,13 +27,13 @@ weixin_mpsearch login
 根据公众号名称搜索候选列表：
 
 ```bash
-weixin_mpsearch listaccount --nickname '腾讯新闻' --count 5
+weixin_mpsearch listaccount --nickname '腾讯新闻' --page 1 --pagesize 5
 ```
 
 根据精确 fakeid 拉取文章列表：
 
 ```bash
-weixin_mpsearch listarticle --fakeid 'MjM5NzM2NjUzNg==' --count 5 --pages 1
+weixin_mpsearch listarticle --fakeid 'MjM5NzM2NjUzNg==' --page 1 --pagesize 5
 ```
 
 根据文章 URL 解析正文内容：
