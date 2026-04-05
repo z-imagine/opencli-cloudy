@@ -22,6 +22,26 @@ npx weixin_mpsearch --help
 npm run start -- --help
 ```
 
+## 初始化
+
+先配置环境变量：
+
+```bash
+export WEIXIN_MP_DB_URL='postgres://user:password@host:5432/dbname'
+```
+
+然后执行：
+
+```bash
+npx weixin_mpsearch setup
+```
+
+这个命令会：
+
+- 初始化本地运行目录
+- 连接数据库
+- 执行包内置 SQL：`sql/init.sql`
+
 ## 用法
 
 扫码登录并保存本地会话：

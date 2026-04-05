@@ -7,7 +7,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { PNG } from 'pngjs';
+import { Client } from 'pg';
 
 interface SearchBizItem {
   alias?: string;
@@ -88,6 +90,8 @@ interface ParsedArticleResult {
 }
 
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36';
+const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DEFAULT_SQL_FILE = path.resolve(ROOT_DIR, 'sql/init.sql');
 const DEFAULT_SESSION_FILE = path.resolve(process.cwd(), 'tmp/weixin-mp-session.json');
 const DEFAULT_QR_FILE = path.resolve(process.cwd(), 'tmp/weixin-mp-login-qrcode.jpg');
 const require = createRequire(import.meta.url);
@@ -113,6 +117,11 @@ function sleep(ms: number): Promise<void> {
 
 function ensureParentDir(filePath: string): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
+}
+
+function ensureRuntimeDirs(): void {
+  ensureParentDir(DEFAULT_SESSION_FILE);
+  ensureParentDir(DEFAULT_QR_FILE);
 }
 
 function randomSessionId(): string {
@@ -726,6 +735,38 @@ async function main(): Promise<void> {
   program
     .name('weixin_mpsearch')
     .description('MVP：查询微信公众号候选列表、文章列表与文章正文');
+
+  program
+    .command('setup')
+    .description('初始化本地运行目录，并按环境变量连接数据库执行初始化 SQL')
+    .action(async () => {
+      ensureRuntimeDirs();
+
+      const dbUrl = process.env.WEIXIN_MP_DB_URL?.trim() || process.env.DATABASE_URL?.trim();
+      if (!dbUrl) {
+        throw new Error('缺少数据库连接配置。请先设置 WEIXIN_MP_DB_URL。');
+      }
+      if (!fs.existsSync(DEFAULT_SQL_FILE)) {
+        throw new Error(`未找到初始化 SQL 文件：${DEFAULT_SQL_FILE}`);
+      }
+
+      const sslMode = process.env.WEIXIN_MP_DB_SSL?.trim().toLowerCase();
+      const client = new Client({
+        connectionString: dbUrl,
+        ssl: sslMode === 'true' ? { rejectUnauthorized: false } : undefined,
+      });
+
+      const sql = fs.readFileSync(DEFAULT_SQL_FILE, 'utf8');
+      try {
+        await client.connect();
+        await client.query(sql);
+      } finally {
+        await client.end().catch(() => undefined);
+      }
+
+      console.log(`本地运行目录已初始化：${path.dirname(DEFAULT_SESSION_FILE)}`);
+      console.log(`数据库初始化 SQL 已执行完成：${DEFAULT_SQL_FILE}`);
+    });
 
   program
     .command('login')
