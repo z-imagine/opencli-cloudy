@@ -5,7 +5,7 @@
 ## 安装
 
 ```bash
-cd command/weixin-mp-list
+cd command/weixin-mpsearch
 npm install
 npm run build
 ```

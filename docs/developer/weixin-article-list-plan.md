@@ -127,29 +127,23 @@ JSON：
 - `totalCount`
 - `items[]`
 
-### 4.3 脚本位置
+### 4.3 工具位置
 
-- [weixin-mp-list.ts](/Users/samuel/Projects/SkillProjects/opencli/scripts/weixin-mp-list.ts)
+- [command/weixin-mpsearch](/Users/samuel/Projects/SkillProjects/opencli/command/weixin-mpsearch)
 
 建议运行方式：
 
 ```bash
-tsx scripts/weixin-mp-list.ts \
-  --cookie '<your-cookie>' \
-  --nickname '机器之心' \
-  --pages 2 \
-  --count 5
+cd command/weixin-mpsearch
+npm install
+npx weixin_mpsearch listaccount --nickname '机器之心' --page 1 --pagesize 5
 ```
 
-如果已经知道 `token` 和 `fakeid`：
+如果已经知道精确 `fakeid`：
 
 ```bash
-tsx scripts/weixin-mp-list.ts \
-  --cookie '<your-cookie>' \
-  --token '<your-token>' \
-  --fakeid '2394588245' \
-  --pages 3 \
-  --count 5
+cd command/weixin-mpsearch
+npx weixin_mpsearch listarticle --fakeid '2394588245' --page 1 --pagesize 5
 ```
 
 ### 4.4 token 策略
